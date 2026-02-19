@@ -1,0 +1,42 @@
+device: cuda
+exp_num: 1
+path: "darcy_teacher"
+th_seed: 1
+np_seed: 1
+
+unet:
+  dim: [1, 128, 128]
+  channel_mult: "1,  2,  4,  4"
+  num_channels: 64
+  num_res_blocks: 2
+  num_head_channels: 32
+  attention_resolutions: "32"
+  dropout: 0.0
+  use_new_attention_order: True
+  use_scale_shift_norm: True
+  class_cond: False
+  num_classes:
+
+vp:
+  schedule_s: 0.008
+
+dataloader:
+  datapath: "/content/drive/MyDrive/2D_DarcyFlow_beta1.0_Train.hdf5"
+  batch_size: 16
+  dataset: "VF_FM"
+
+optimizer:
+  lr: 1e-4
+
+train:
+  num_epochs: 200
+
+  logger_dict:
+    format_strs: ["log", "tensorboard"]
+    log_print_freq: 5
+
+  checkpointing_dict:
+    restart: False
+    restart_epoch: null
+    save_epoch_int: 25
+    log_batch_int: 10

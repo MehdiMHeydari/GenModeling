@@ -1,0 +1,30 @@
+device: cuda
+th_seed: 156
+np_seed: 156
+
+unet:
+  dim: [1, 128, 128]
+  channel_mult: "1,  2,  4,  4"
+  num_channels: 64
+  num_res_blocks: 2
+  num_head_channels: 32
+  attention_resolutions: "32"
+  dropout: 0.0
+  use_new_attention_order: True
+  use_scale_shift_norm: True
+  class_cond: False
+  num_classes:
+
+schedule_s: 0.008
+
+cd:
+  checkpoint_path: "darcy_student/exp_1/saved_state/checkpoint_90.pt"
+  student_steps: 2
+
+inference:
+  total_samples_to_generate: 24
+  shape_of_sample: "1,128,128"
+  batch_size: 8
+  use_ema: True
+  save_path: "darcy_student/exp_1/gen_samples/samples.pt"
+  norm_stats_dir: "darcy_teacher/exp_1/saved_state"

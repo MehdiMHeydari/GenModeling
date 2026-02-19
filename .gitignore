@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.pyo
+.env
+.vscode
+.DS_Store
+*.hdf5
+*.npy
+*.pt
+*.pth
+logs/
+debug/
