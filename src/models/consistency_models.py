@@ -90,12 +90,19 @@ class MultistepConsistencyModel(GenerativeModel):
         # Network forward pass
         raw = net(t=t, x=z_t, **kwargs)
 
-        # Skip connection: at boundary, recover x = z_t / alpha_t
+        # Apply teacher-style preconditioning to raw network output:
+        #   x_net = alpha_t^2 * z_t + alpha_t * sigma_t * raw
+        # This matches VPDiffusionModel.predict_x, so the network output
+        # is interpreted in the same scale it was trained with.
         a_t = _broadcast_to_spatial(alpha_t(t, self.schedule_s), z_t)
+        s_t = _broadcast_to_spatial(sigma_t(t, self.schedule_s), z_t)
+        x_net = a_t ** 2 * z_t + a_t * s_t * raw
+
+        # Boundary identity: at segment start, recover x = z_t / alpha_t
         x_identity = z_t / a_t.clamp(min=1e-4)
 
-        # Blend: at boundary c_skip=1 (identity), away from boundary c_out grows
-        x_hat = (1.0 - segment_frac_b) * x_identity + segment_frac_b * raw
+        # Blend: at boundary c_skip=1 (identity), away from boundary network takes over
+        x_hat = (1.0 - segment_frac_b) * x_identity + segment_frac_b * x_net
 
         return x_hat
 
