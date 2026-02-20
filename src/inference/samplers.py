@@ -47,14 +47,21 @@ class MultistepCMSampler:
         model_kwargs = {'y': y} if y is not None else {}
 
         for i in range(T, 0, -1):
+            # Offset t slightly below the segment boundary so that
+            # floor(t * T) assigns it to segment i-1 (where segment_frac ≈ 1,
+            # full network output). Without this, exact t = i/T lands on
+            # segment i's boundary (segment_frac = 0, pure identity = garbage).
             t_val = torch.full(
-                (z.shape[0],), i / T,
+                (z.shape[0],), i / T - 1e-4,
                 device=z.device, dtype=z.dtype
             )
-            s_val = t_val - 1.0 / T
+            s_val = torch.full(
+                (z.shape[0],), (i - 1) / T,
+                device=z.device, dtype=z.dtype
+            )
 
             x_hat = self.model.predict_x(
-                z, t_val, use_ema=False, **model_kwargs
+                z, t_val, use_ema=True, **model_kwargs
             )
             z = ddim_step(x_hat, z, t_val, s_val, schedule_s)
 

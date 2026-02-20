@@ -134,12 +134,16 @@ class MultistepConsistencyModel(GenerativeModel):
         T = self.student_steps
 
         for i in range(T, 0, -1):
+            # Offset t below the segment boundary so floor(t*T) assigns it
+            # to segment i-1 (top of segment, full network output).
             t_val = torch.full(
-                (z.shape[0],), i / T, device=z.device, dtype=z.dtype
+                (z.shape[0],), i / T - 1e-4, device=z.device, dtype=z.dtype
             )
-            s_val = t_val - 1.0 / T
+            s_val = torch.full(
+                (z.shape[0],), (i - 1) / T, device=z.device, dtype=z.dtype
+            )
 
-            x_hat = self.predict_x(z, t_val, use_ema=False, **kwargs)
+            x_hat = self.predict_x(z, t_val, use_ema=True, **kwargs)
             z = ddim_step(x_hat, z, t_val, s_val, self.schedule_s)
 
         return z
