@@ -51,14 +51,11 @@ class MultistepConsistencyModel(GenerativeModel):
         """
         Predict clean data x_hat from (z_t, t).
 
-        Uses a boundary-respecting parameterization: at the start of each
-        segment (t = t_step), the prediction is constrained to recover x
-        from z_t via a skip connection. As t increases within the segment,
-        the network output is blended in.
+        Uses the same preconditioning as the VP diffusion teacher:
+          x_hat = alpha_t^2 * z_t + alpha_t * sigma_t * F_theta(z_t, t)
 
-        Parameterization:
-          x_hat = c_skip(t) * (z_t / alpha_t) + c_out(t) * F_theta(z_t, t)
-        where c_skip -> 1 and c_out -> 0 as t -> t_step (boundary condition).
+        The consistency constraint (self-consistency across each segment)
+        is enforced by the CD training loss, not by the architecture.
 
         Args:
             z_t: Noisy input [B, C, H, W].
@@ -76,33 +73,11 @@ class MultistepConsistencyModel(GenerativeModel):
 
         net = self.ema_network if use_ema else self.network
 
-        # Determine which segment each sample falls in
-        step = torch.floor(t * self.student_steps).clamp(
-            0, self.student_steps - 1
-        ).long()
-        t_step = step.float() / self.student_steps
-
-        # Fraction through the current segment: 0 at boundary, ~1 at end
-        segment_frac = (t - t_step) * self.student_steps
-        segment_frac = segment_frac.clamp(0.0, 1.0)
-        segment_frac_b = _broadcast_to_spatial(segment_frac, z_t)
-
-        # Network forward pass
         raw = net(t=t, x=z_t, **kwargs)
 
-        # Apply teacher-style preconditioning to raw network output:
-        #   x_net = alpha_t^2 * z_t + alpha_t * sigma_t * raw
-        # This matches VPDiffusionModel.predict_x, so the network output
-        # is interpreted in the same scale it was trained with.
         a_t = _broadcast_to_spatial(alpha_t(t, self.schedule_s), z_t)
         s_t = _broadcast_to_spatial(sigma_t(t, self.schedule_s), z_t)
-        x_net = a_t ** 2 * z_t + a_t * s_t * raw
-
-        # Boundary identity: at segment start, recover x = z_t / alpha_t
-        x_identity = z_t / a_t.clamp(min=1e-4)
-
-        # Blend: at boundary c_skip=1 (identity), away from boundary network takes over
-        x_hat = (1.0 - segment_frac_b) * x_identity + segment_frac_b * x_net
+        x_hat = a_t ** 2 * z_t + a_t * s_t * raw
 
         return x_hat
 
