@@ -47,10 +47,7 @@ class MultistepCMSampler:
         model_kwargs = {'y': y} if y is not None else {}
 
         for i in range(T, 0, -1):
-            # Offset t slightly below the segment boundary so that
-            # floor(t * T) assigns it to segment i-1 (where segment_frac ≈ 1,
-            # full network output). Without this, exact t = i/T lands on
-            # segment i's boundary (segment_frac = 0, pure identity = garbage).
+            # Offset t slightly below i/T to avoid exact t=1.0 where alpha_t≈0
             t_val = torch.full(
                 (z.shape[0],), i / T - 1e-4,
                 device=z.device, dtype=z.dtype

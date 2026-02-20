@@ -20,12 +20,12 @@ class MultistepConsistencyModel(GenerativeModel):
     """
     Multistep Consistency Model (MCM).
 
-    The same network weights are shared across all segments. At each
-    segment boundary t_step = step/student_steps, the model is
-    parameterized to satisfy a boundary condition via a skip connection.
+    Uses the same predict_x parameterization as the VP diffusion teacher.
+    Consistency across segments is enforced by the CD training loss
+    (MultistepCDLoss), not by the model architecture.
 
-    An EMA (exponential moving average) copy of the network is maintained
-    internally for use as the target model during consistency distillation.
+    An EMA copy of the network is maintained for use as the target
+    during consistency distillation training.
 
     Args:
         network: The backbone UNet/Transformer.
@@ -116,8 +116,7 @@ class MultistepConsistencyModel(GenerativeModel):
         T = self.student_steps
 
         for i in range(T, 0, -1):
-            # Offset t below the segment boundary so floor(t*T) assigns it
-            # to segment i-1 (top of segment, full network output).
+            # Offset t slightly below i/T to avoid exact t=1.0 where alpha_t≈0
             t_val = torch.full(
                 (z.shape[0],), i / T - 1e-4, device=z.device, dtype=z.dtype
             )
