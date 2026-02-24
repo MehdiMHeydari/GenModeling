@@ -21,9 +21,10 @@ vp:
   schedule_s: 0.008
 
 dataloader:
-  datapath: "/content/drive/MyDrive/2D_DarcyFlow_beta1.0_Train.hdf5"
+  datapath: "data/2D_DarcyFlow_beta1.0_Train.hdf5"
   batch_size: 16
   dataset: "VF_FM"
+  train_samples: 9000
 
 optimizer:
   lr: 1e-4

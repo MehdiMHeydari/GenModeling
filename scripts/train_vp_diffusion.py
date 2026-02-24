@@ -12,26 +12,36 @@ import shutil
 import torch as th
 import numpy as np
 from torch.optim import Adam
+from tqdm.auto import tqdm
 
 from src.models.networks.unet.unet import UNetModelWrapper as UNetModel
-from src.utils.dataloader import get_loaders_vf_fm
+from src.utils.dataloader import get_darcy_loader
 from src.utils.dataset import DATASETS
-from src.training.trainer import Trainer
-from src.training.objectives import VPDiffusionLoss
 from src.models.vp_diffusion import VPDiffusionModel
+from src.training.objectives import VPDiffusionLoss
 
 
-def create_dir(path, config):
+def create_dir(path, restart=False):
     if os.path.exists(path):
-        if not config.train.checkpointing_dict.restart:
-            print(f"Directory '{path}' already exists and restart is False. Deleting and recreating directory.")
+        if not restart:
+            print(f"Directory '{path}' already exists. Deleting and recreating.")
             shutil.rmtree(path)
             os.makedirs(path)
         else:
-            print(f"Directory '{path}' already exists. Resuming training.")
+            print(f"Directory '{path}' already exists. Resuming.")
     else:
         os.makedirs(path)
         print(f"Directory '{path}' created.")
+
+
+def save_checkpoint(model, optimizer, epoch, save_path):
+    state = {
+        'epoch': epoch,
+        'model_state_dict': model.network.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'sched_state_dict': None,
+    }
+    th.save(state, f"{save_path}/checkpoint_{epoch}.pt")
 
 
 def main(config_path):
@@ -42,20 +52,24 @@ def main(config_path):
 
     logpath = config.path + f"/exp_{config.exp_num}"
     savepath = logpath + "/saved_state"
-    create_dir(logpath, config=config)
-    create_dir(savepath, config=config)
-
-    config.train.logger_dict.dir = logpath
-    config.train.checkpointing_dict.save_path = savepath
+    restart = config.train.checkpointing_dict.get("restart", False)
+    create_dir(logpath, restart=restart)
+    create_dir(savepath, restart=restart)
 
     dev = th.device(config.device)
 
-    train_dataloader = get_loaders_vf_fm(
-        vf_paths=config.dataloader.datapath,
+    # --- Data (HDF5 Darcy Flow) ---
+    train_loader, data_min, data_max = get_darcy_loader(
+        data_path=config.dataloader.datapath,
         batch_size=config.dataloader.batch_size,
-        dataset_=DATASETS[config.dataloader.dataset],
+        dataset_cls=DATASETS[config.dataloader.dataset],
+        train_samples=config.dataloader.get("train_samples", 9000),
+        save_dir=savepath,
     )
+    print(f"Data loaded: {len(train_loader)} batches/epoch, "
+          f"range [{data_min:.4f}, {data_max:.4f}]")
 
+    # --- Network ---
     network = UNetModel(
         dim=config.unet.dim,
         channel_mult=config.unet.channel_mult,
@@ -66,36 +80,68 @@ def main(config_path):
         dropout=config.unet.dropout,
         use_new_attention_order=config.unet.new_attn,
         use_scale_shift_norm=config.unet.film,
-        class_cond=config.unet.class_cond if hasattr(config.unet, 'class_cond') else False,
-        num_classes=config.unet.num_classes if hasattr(config.unet, 'num_classes') else None,
+        class_cond=config.unet.get("class_cond", False),
+        num_classes=config.unet.get("num_classes", None),
     )
+    total_params = sum(p.numel() for p in network.parameters())
+    print(f"UNet parameters: {total_params:,}")
 
-    schedule_s = config.vp_diffusion.schedule_s if hasattr(config, 'vp_diffusion') else 0.008
+    schedule_s = config.get("vp", {}).get("schedule_s", 0.008)
+    model = VPDiffusionModel(network=network, schedule_s=schedule_s)
+    model.to(dev)
 
-    model = VPDiffusionModel(
-        network=network,
-        schedule_s=schedule_s,
-    )
-
+    # --- Optimizer ---
     optim = Adam(model.network.parameters(), lr=config.optimizer.lr)
-    sched = None
 
-    class_cond = config.unet.class_cond if hasattr(config.unet, 'class_cond') else False
-    objective = VPDiffusionLoss(class_conditional=class_cond)
+    # --- Resume ---
+    start_epoch = 0
+    if restart:
+        restart_epoch = config.train.checkpointing_dict.restart_epoch
+        ckpt_path = f"{savepath}/checkpoint_{restart_epoch}.pt"
+        assert os.path.exists(ckpt_path), f"No checkpoint at {ckpt_path}"
+        state = th.load(ckpt_path, map_location='cpu', weights_only=True)
+        model.network.load_state_dict(state['model_state_dict'])
+        optim.load_state_dict(state['optimizer_state_dict'])
+        start_epoch = restart_epoch + 1
+        print(f"Resumed from epoch {restart_epoch}")
 
-    trainer = Trainer(
-        model=model,
-        objective=objective,
-        dataloader=train_dataloader,
-        optimizer=optim,
-        scheduler=sched,
-        logger_dict=config.train.logger_dict,
-        checkpointing_dict=config.train.checkpointing_dict,
-        device=dev,
-        config=config,
+    # --- Loss ---
+    objective = VPDiffusionLoss(
+        class_conditional=config.unet.get("class_cond", False)
     )
 
-    trainer.train(num_epochs=config.train.num_epochs)
+    # --- Training loop ---
+    num_epochs = config.train.num_epochs
+    save_interval = config.train.checkpointing_dict.save_epoch_int
+    best_loss = float('inf')
+
+    print(f"Starting teacher training: {num_epochs} epochs")
+
+    for epoch in tqdm(range(start_epoch, num_epochs), desc="Teacher"):
+        model.network.train()
+        total_loss = 0.0
+
+        for batch in train_loader:
+            loss = objective(model, batch, device=dev)
+            optim.zero_grad()
+            loss.backward()
+            optim.step()
+            total_loss += loss.item()
+
+        avg_loss = total_loss / len(train_loader)
+        best_loss = min(best_loss, avg_loss)
+
+        if epoch % 5 == 0 or epoch == num_epochs - 1:
+            tqdm.write(f"Epoch {epoch}: loss={avg_loss:.6f}, best={best_loss:.6f}")
+
+        if epoch % save_interval == 0:
+            save_checkpoint(model, optim, epoch, savepath)
+            tqdm.write(f"  Saved checkpoint_{epoch}.pt")
+
+    # Save final
+    save_checkpoint(model, optim, num_epochs - 1, savepath)
+    print(f"Training complete. Best loss: {best_loss:.6f}")
+    print(f"Checkpoints in {savepath}")
 
 
 if __name__ == '__main__':

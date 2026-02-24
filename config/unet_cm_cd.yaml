@@ -19,7 +19,7 @@ unet:
 
 cd:
   teacher_checkpoint: "darcy_teacher/exp_1/saved_state/checkpoint_175.pt"
-  student_steps: 2
+  student_steps: 4
   schedule_s: 0.008
   ema_rate: 0.9999
   init_from_teacher: True
@@ -27,15 +27,16 @@ cd:
   huber_epsilon: 1e-4
 
 dataloader:
-  datapath: "/content/drive/MyDrive/2D_DarcyFlow_beta1.0_Train.hdf5"
+  datapath: "data/2D_DarcyFlow_beta1.0_Train.hdf5"
   batch_size: 16
   dataset: "VF_FM"
+  train_samples: 9000
 
 optimizer:
   lr: 1e-4
 
 train:
-  num_epochs: 100
+  num_epochs: 200
 
   logger_dict:
     format_strs: ["log", "tensorboard"]
@@ -44,5 +45,5 @@ train:
   checkpointing_dict:
     restart: False
     restart_epoch: null
-    save_epoch_int: 10
+    save_epoch_int: 25
     log_batch_int: 10
