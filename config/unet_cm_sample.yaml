@@ -18,11 +18,11 @@ unet:
 schedule_s: 0.008
 
 cd:
-  checkpoint_path: "darcy_student/exp_1/saved_state/checkpoint_90.pt"
-  student_steps: 2
+  checkpoint_path: "darcy_student/exp_1/saved_state/checkpoint_175.pt"
+  student_steps: 4
 
 inference:
-  total_samples_to_generate: 24
+  total_samples_to_generate: 500
   shape_of_sample: "1,128,128"
   batch_size: 8
   use_ema: True
