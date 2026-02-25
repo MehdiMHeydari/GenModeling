@@ -12,8 +12,8 @@ import shutil
 import torch as th
 import numpy as np
 from torch.optim import Adam
-from torch.optim.lr_scheduler import CosineAnnealingLR
 from tqdm.auto import tqdm
+import wandb
 
 from src.models.networks.unet.unet import UNetModelWrapper as UNetModel
 from src.utils.dataloader import get_darcy_loader
@@ -95,10 +95,16 @@ def main(config_path):
     model.to(dev)
     print(f"EMA rate: {ema_rate}")
 
-    # --- Optimizer + LR Schedule ---
+    # --- Optimizer ---
     num_epochs = config.train.num_epochs
     optim = Adam(model.network.parameters(), lr=config.optimizer.lr)
-    scheduler = CosineAnnealingLR(optim, T_max=num_epochs, eta_min=1e-6)
+
+    # --- Weights & Biases ---
+    wandb.init(
+        project="darcy-teacher",
+        name=f"vp_diffusion_exp{config.exp_num}",
+        config=OmegaConf.to_container(config, resolve=True),
+    )
 
     # --- Resume ---
     start_epoch = 0
@@ -112,9 +118,6 @@ def main(config_path):
             model.ema_network.load_state_dict(state['ema_state_dict'])
         optim.load_state_dict(state['optimizer_state_dict'])
         start_epoch = restart_epoch + 1
-        # Advance scheduler to correct position
-        for _ in range(start_epoch):
-            scheduler.step()
         print(f"Resumed from epoch {restart_epoch}")
 
     # --- Loss ---
@@ -141,14 +144,14 @@ def main(config_path):
             model.update_ema()
             total_loss += loss.item()
 
-        scheduler.step()
         avg_loss = total_loss / len(train_loader)
         best_loss = min(best_loss, avg_loss)
 
+        wandb.log({"loss": avg_loss, "best_loss": best_loss, "epoch": epoch})
+
         if epoch % 5 == 0 or epoch == num_epochs - 1:
-            lr_now = scheduler.get_last_lr()[0]
             tqdm.write(f"Epoch {epoch}: loss={avg_loss:.6f}, "
-                       f"best={best_loss:.6f}, lr={lr_now:.2e}")
+                       f"best={best_loss:.6f}")
 
         if epoch % save_interval == 0:
             save_checkpoint(model, optim, epoch, savepath)
@@ -158,6 +161,7 @@ def main(config_path):
     save_checkpoint(model, optim, num_epochs - 1, savepath)
     print(f"Training complete. Best loss: {best_loss:.6f}")
     print(f"Checkpoints in {savepath}")
+    wandb.finish()
 
 
 if __name__ == '__main__':

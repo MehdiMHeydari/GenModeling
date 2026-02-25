@@ -23,12 +23,12 @@ vp:
 
 dataloader:
   datapath: "data/2D_DarcyFlow_beta1.0_Train.hdf5"
-  batch_size: 128
+  batch_size: 64
   dataset: "VF_FM"
   train_samples: 9000
 
 optimizer:
-  lr: 2e-4
+  lr: 1e-4
 
 train:
   num_epochs: 400
@@ -40,5 +40,5 @@ train:
   checkpointing_dict:
     restart: False
     restart_epoch: null
-    save_epoch_int: 50
+    save_epoch_int: 25
     log_batch_int: 10
