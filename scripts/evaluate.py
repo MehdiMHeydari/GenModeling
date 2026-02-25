@@ -56,8 +56,11 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 # ============================================================
 # FIND BEST CHECKPOINT
 # ============================================================
-cd_ckpts = sorted([f for f in os.listdir(CD_SAVE_DIR)
-                   if f.startswith('checkpoint_') and f.endswith('.pt')])
+cd_ckpts = sorted(
+    [f for f in os.listdir(CD_SAVE_DIR)
+     if f.startswith('checkpoint_') and f.endswith('.pt')],
+    key=lambda f: int(f.split('_')[1].split('.')[0])  # sort by epoch number
+)
 print("Available CD checkpoints:", cd_ckpts)
 CD_CKPT = os.path.join(CD_SAVE_DIR, cd_ckpts[-1])
 print(f"Using: {CD_CKPT}")
@@ -74,8 +77,14 @@ with h5py.File(DATA_PATH, 'r') as f:
 if outputs.ndim == 3:
     outputs = outputs[:, np.newaxis, :, :]
 
-data_min = float(np.load(os.path.join(TEACHER_SAVE_DIR, "data_min.npy")))
-data_max = float(np.load(os.path.join(TEACHER_SAVE_DIR, "data_max.npy")))
+# Norm stats saved by whichever training script ran with save_dir
+# Check both teacher and student dirs
+for stats_dir in [TEACHER_SAVE_DIR, CD_SAVE_DIR]:
+    if os.path.exists(os.path.join(stats_dir, "data_min.npy")):
+        break
+data_min = float(np.load(os.path.join(stats_dir, "data_min.npy")))
+data_max = float(np.load(os.path.join(stats_dir, "data_max.npy")))
+print(f"Loaded norm stats from {stats_dir}")
 
 
 def denormalize(x_norm):
