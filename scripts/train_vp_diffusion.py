@@ -153,7 +153,7 @@ def main(config_path):
             tqdm.write(f"Epoch {epoch}: loss={avg_loss:.6f}, "
                        f"best={best_loss:.6f}")
 
-        if epoch % save_interval == 0:
+        if epoch % save_interval == 0 or epoch == num_epochs - 1:
             save_checkpoint(model, optim, epoch, savepath)
             tqdm.write(f"  Saved checkpoint_{epoch}.pt")
 
