@@ -36,7 +36,7 @@ optimizer:
   lr: 1e-4
 
 train:
-  num_epochs: 200
+  num_epochs: 400
 
   logger_dict:
     format_strs: ["log", "tensorboard"]
