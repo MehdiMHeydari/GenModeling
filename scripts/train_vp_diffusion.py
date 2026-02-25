@@ -12,6 +12,7 @@ import shutil
 import torch as th
 import numpy as np
 from torch.optim import Adam
+from torch.optim.lr_scheduler import CosineAnnealingLR
 from tqdm.auto import tqdm
 
 from src.models.networks.unet.unet import UNetModelWrapper as UNetModel
@@ -39,8 +40,10 @@ def save_checkpoint(model, optimizer, epoch, save_path):
         'epoch': epoch,
         'model_state_dict': model.network.state_dict(),
         'optimizer_state_dict': optimizer.state_dict(),
-        'sched_state_dict': None,
     }
+    # Save EMA weights if available
+    if model.ema_network is not None:
+        state['ema_state_dict'] = model.ema_network.state_dict()
     th.save(state, f"{save_path}/checkpoint_{epoch}.pt")
 
 
@@ -87,11 +90,15 @@ def main(config_path):
     print(f"UNet parameters: {total_params:,}")
 
     schedule_s = config.get("vp", {}).get("schedule_s", 0.008)
-    model = VPDiffusionModel(network=network, schedule_s=schedule_s)
+    ema_rate = config.get("vp", {}).get("ema_rate", 0.9999)
+    model = VPDiffusionModel(network=network, schedule_s=schedule_s, ema_rate=ema_rate)
     model.to(dev)
+    print(f"EMA rate: {ema_rate}")
 
-    # --- Optimizer ---
+    # --- Optimizer + LR Schedule ---
+    num_epochs = config.train.num_epochs
     optim = Adam(model.network.parameters(), lr=config.optimizer.lr)
+    scheduler = CosineAnnealingLR(optim, T_max=num_epochs, eta_min=1e-6)
 
     # --- Resume ---
     start_epoch = 0
@@ -101,8 +108,13 @@ def main(config_path):
         assert os.path.exists(ckpt_path), f"No checkpoint at {ckpt_path}"
         state = th.load(ckpt_path, map_location='cpu', weights_only=True)
         model.network.load_state_dict(state['model_state_dict'])
+        if 'ema_state_dict' in state and model.ema_network is not None:
+            model.ema_network.load_state_dict(state['ema_state_dict'])
         optim.load_state_dict(state['optimizer_state_dict'])
         start_epoch = restart_epoch + 1
+        # Advance scheduler to correct position
+        for _ in range(start_epoch):
+            scheduler.step()
         print(f"Resumed from epoch {restart_epoch}")
 
     # --- Loss ---
@@ -111,11 +123,11 @@ def main(config_path):
     )
 
     # --- Training loop ---
-    num_epochs = config.train.num_epochs
     save_interval = config.train.checkpointing_dict.save_epoch_int
     best_loss = float('inf')
 
-    print(f"Starting teacher training: {num_epochs} epochs")
+    print(f"Starting teacher training: {num_epochs} epochs, "
+          f"batch_size={config.dataloader.batch_size}, lr={config.optimizer.lr}")
 
     for epoch in tqdm(range(start_epoch, num_epochs), desc="Teacher"):
         model.network.train()
@@ -126,13 +138,17 @@ def main(config_path):
             optim.zero_grad()
             loss.backward()
             optim.step()
+            model.update_ema()
             total_loss += loss.item()
 
+        scheduler.step()
         avg_loss = total_loss / len(train_loader)
         best_loss = min(best_loss, avg_loss)
 
         if epoch % 5 == 0 or epoch == num_epochs - 1:
-            tqdm.write(f"Epoch {epoch}: loss={avg_loss:.6f}, best={best_loss:.6f}")
+            lr_now = scheduler.get_last_lr()[0]
+            tqdm.write(f"Epoch {epoch}: loss={avg_loss:.6f}, "
+                       f"best={best_loss:.6f}, lr={lr_now:.2e}")
 
         if epoch % save_interval == 0:
             save_checkpoint(model, optim, epoch, savepath)

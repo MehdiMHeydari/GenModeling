@@ -99,7 +99,13 @@ def main(config_path):
     teacher_state = th.load(
         config.cd.teacher_checkpoint, map_location='cpu', weights_only=True,
     )
-    teacher.network.load_state_dict(teacher_state['model_state_dict'])
+    # Prefer EMA weights if available (higher quality)
+    if 'ema_state_dict' in teacher_state:
+        teacher.network.load_state_dict(teacher_state['ema_state_dict'])
+        print("Using teacher EMA weights")
+    else:
+        teacher.network.load_state_dict(teacher_state['model_state_dict'])
+        print("Using teacher raw weights (no EMA found)")
     teacher.to(dev)
     teacher.eval()
     for p in teacher.parameters():

@@ -146,7 +146,13 @@ print(f"\nGenerating {NUM_SAMPLES} teacher samples ({DDIM_STEPS} aDDIM steps)...
 teacher_net = UNetModel(**UNET_CFG)
 teacher = VPDiffusionModel(network=teacher_net, schedule_s=SCHEDULE_S, infer=True)
 t_state = th.load(TEACHER_CKPT, map_location='cpu', weights_only=True)
-teacher.network.load_state_dict(t_state['model_state_dict'])
+# Prefer EMA weights if available (higher quality)
+if 'ema_state_dict' in t_state:
+    teacher.network.load_state_dict(t_state['ema_state_dict'])
+    print("Using teacher EMA weights")
+else:
+    teacher.network.load_state_dict(t_state['model_state_dict'])
+    print("Using teacher raw weights (no EMA found)")
 teacher.to(DEVICE)
 teacher.eval()
 
