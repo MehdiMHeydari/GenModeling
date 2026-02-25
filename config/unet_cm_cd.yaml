@@ -28,7 +28,7 @@ cd:
 
 dataloader:
   datapath: "data/2D_DarcyFlow_beta1.0_Train.hdf5"
-  batch_size: 128
+  batch_size: 64
   dataset: "VF_FM"
   train_samples: 9000
 
