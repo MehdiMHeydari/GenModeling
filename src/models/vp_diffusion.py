@@ -6,9 +6,11 @@ Follows the same pattern as src/models/score_models.py (ScoreModel).
 The network predicts clean data x_0 from noisy z_t using preconditioning.
 """
 
+import copy
 import torch
 from .base import GenerativeModel
 from .diffusion_utils import alpha_t, sigma_t, snr, q_sample, _broadcast_to_spatial
+from .networks.shared.layers import update_ema
 
 
 class VPDiffusionModel(GenerativeModel):
@@ -23,13 +25,33 @@ class VPDiffusionModel(GenerativeModel):
     Args:
         network: The backbone UNet/Transformer. Must accept forward(t, x, y=None).
         schedule_s: Cosine schedule offset parameter (default 0.008).
+        ema_rate: EMA decay rate (default 0.9999). Set to 0 to disable.
     """
 
-    def __init__(self, network, schedule_s=0.008, *args, **kwargs):
+    def __init__(self, network, schedule_s=0.008, ema_rate=0.9999, *args, **kwargs):
         super().__init__(network, infer=kwargs.get('infer', False))
         self.schedule_s = schedule_s
+        self.ema_rate = ema_rate
 
-    def predict_x(self, z_t, t, **kwargs):
+        # EMA network for higher-quality sampling
+        if ema_rate > 0 and not kwargs.get('infer', False):
+            self.ema_network = copy.deepcopy(network)
+            for p in self.ema_network.parameters():
+                p.requires_grad_(False)
+            self.ema_network.eval()
+        else:
+            self.ema_network = None
+
+    def update_ema(self):
+        """Update EMA network parameters from online network."""
+        if self.ema_network is not None:
+            update_ema(
+                self.ema_network.parameters(),
+                self.network.parameters(),
+                rate=self.ema_rate,
+            )
+
+    def predict_x(self, z_t, t, use_ema=False, **kwargs):
         """
         Predict clean data x_0 from z_t using the preconditioned network.
 
@@ -42,6 +64,7 @@ class VPDiffusionModel(GenerativeModel):
         Args:
             z_t: Noisy input [B, C, H, W].
             t: Timestep [B] in [0, 1].
+            use_ema: If True, use the EMA network for prediction.
             **kwargs: Passed to network (e.g., y for class conditioning).
 
         Returns:
@@ -58,7 +81,8 @@ class VPDiffusionModel(GenerativeModel):
         c_skip = _broadcast_to_spatial(a ** 2, z_t)
         c_out = _broadcast_to_spatial(a * sig, z_t)
 
-        raw = self.network(t=t, x=z_t, **kwargs)
+        net = self.ema_network if (use_ema and self.ema_network is not None) else self.network
+        raw = net(t=t, x=z_t, **kwargs)
         x_hat = c_skip * z_t + c_out * raw
         return x_hat
 
