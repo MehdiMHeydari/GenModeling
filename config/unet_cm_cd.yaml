@@ -18,7 +18,7 @@ unet:
   num_classes:
 
 cd:
-  teacher_checkpoint: "darcy_teacher/exp_1/saved_state/checkpoint_350.pt"
+  teacher_checkpoint: "darcy_teacher/exp_1/saved_state/checkpoint_200.pt"
   student_steps: 4
   schedule_s: 0.008
   ema_rate: 0.9999

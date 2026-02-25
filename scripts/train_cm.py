@@ -16,6 +16,7 @@ import torch as th
 import numpy as np
 from torch.optim import Adam
 from tqdm.auto import tqdm
+import wandb
 
 from src.models.networks.unet.unet import UNetModelWrapper as UNetModel
 from src.utils.dataloader import get_darcy_loader
@@ -99,13 +100,9 @@ def main(config_path):
     teacher_state = th.load(
         config.cd.teacher_checkpoint, map_location='cpu', weights_only=True,
     )
-    # Prefer EMA weights if available (higher quality)
-    if 'ema_state_dict' in teacher_state:
-        teacher.network.load_state_dict(teacher_state['ema_state_dict'])
-        print("Using teacher EMA weights")
-    else:
-        teacher.network.load_state_dict(teacher_state['model_state_dict'])
-        print("Using teacher raw weights (no EMA found)")
+    # Prefer raw weights (empirically better than EMA for this training)
+    teacher.network.load_state_dict(teacher_state['model_state_dict'])
+    print("Using teacher raw weights")
     teacher.to(dev)
     teacher.eval()
     for p in teacher.parameters():
@@ -138,6 +135,13 @@ def main(config_path):
 
     # --- Optimizer ---
     optim = Adam(model.network.parameters(), lr=config.optimizer.lr)
+
+    # --- Weights & Biases ---
+    wandb.init(
+        project="darcy-student",
+        name=f"cd_exp{config.exp_num}",
+        config=OmegaConf.to_container(config, resolve=True),
+    )
 
     # --- Resume ---
     start_epoch = 0
@@ -177,11 +181,14 @@ def main(config_path):
         best_loss = min(best_loss, avg_loss)
         n_teacher = objective._teacher_step_schedule()
 
+        wandb.log({"loss": avg_loss, "best_loss": best_loss,
+                   "N_teacher": n_teacher, "epoch": epoch})
+
         if epoch % 5 == 0 or epoch == num_epochs - 1:
             tqdm.write(f"Epoch {epoch}: loss={avg_loss:.6f}, "
                        f"best={best_loss:.6f}, N_teacher={n_teacher}")
 
-        if epoch % save_interval == 0:
+        if epoch % save_interval == 0 or epoch == num_epochs - 1:
             save_checkpoint(model, optim, epoch, savepath)
             tqdm.write(f"  Saved checkpoint_{epoch}.pt")
 
@@ -189,6 +196,7 @@ def main(config_path):
     save_checkpoint(model, optim, num_epochs - 1, savepath)
     print(f"CD training complete. Best loss: {best_loss:.6f}")
     print(f"Checkpoints in {savepath}")
+    wandb.finish()
 
 
 if __name__ == '__main__':
