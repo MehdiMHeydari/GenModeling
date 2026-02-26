@@ -266,17 +266,10 @@ def time_sampling(sample_fn, noise_batches, device, num_runs=5):
 # ============================================================
 
 def plot_sample_grids(results, output_path):
-    """Output 1: Side-by-side sample grids."""
+    """Output 1: Side-by-side sample grids (auto-scaled per image)."""
     n_cols = 8
     model_names = list(results.keys())
     n_rows = len(model_names)
-
-    # Global colormap range
-    all_shown = []
-    for name in model_names:
-        all_shown.append(results[name]['samples'][:n_cols])
-    vmin = min(s.min() for s in all_shown)
-    vmax = max(s.max() for s in all_shown)
 
     fig, axes = plt.subplots(n_rows, n_cols, figsize=(3 * n_cols, 3 * n_rows))
     if n_rows == 1:
@@ -286,15 +279,12 @@ def plot_sample_grids(results, output_path):
         samples = results[name]['samples']
         for col in range(n_cols):
             if col < len(samples):
-                im = axes[row, col].imshow(
-                    samples[col, 0], cmap='viridis', vmin=vmin, vmax=vmax
-                )
+                axes[row, col].imshow(samples[col, 0], cmap='viridis')
             axes[row, col].axis('off')
             if col == 0:
                 axes[row, col].set_ylabel(name, fontsize=11, rotation=0,
                                           labelpad=100, va='center')
 
-    fig.colorbar(im, ax=axes, shrink=0.6, label='u(x,y)')
     plt.suptitle('Sample Comparison', fontsize=16, y=1.01)
     plt.tight_layout()
     plt.savefig(output_path, dpi=150, bbox_inches='tight')
