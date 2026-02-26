@@ -271,7 +271,7 @@ def plot_sample_grids(results, output_path):
     model_names = list(results.keys())
     n_rows = len(model_names)
 
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(3 * n_cols, 3 * n_rows))
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(3 * n_cols, 3.5 * n_rows))
     if n_rows == 1:
         axes = axes[np.newaxis, :]
 
@@ -282,10 +282,16 @@ def plot_sample_grids(results, output_path):
                 axes[row, col].imshow(samples[col, 0], cmap='viridis')
             axes[row, col].axis('off')
             if col == 0:
-                axes[row, col].set_ylabel(name, fontsize=11, rotation=0,
-                                          labelpad=100, va='center')
+                axes[row, col].set_title(f'Sample 1', fontsize=9)
+        # Row label on the left
+        axes[row, 0].set_ylabel(name, fontsize=13, fontweight='bold',
+                                rotation=0, labelpad=120, va='center')
 
-    plt.suptitle('Sample Comparison', fontsize=16, y=1.01)
+    # Column headers
+    for col in range(n_cols):
+        axes[0, col].set_title(f'Sample {col + 1}', fontsize=9)
+
+    plt.suptitle('Sample Comparison (each image auto-scaled)', fontsize=16, y=1.01)
     plt.tight_layout()
     plt.savefig(output_path, dpi=150, bbox_inches='tight')
     plt.close()
