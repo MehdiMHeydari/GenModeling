@@ -31,5 +31,14 @@ All student runs stored under `darcy_student/`
 - **CD params:** ema_rate=0.9999, x_var_frac=0.75, huber_epsilon=1e-4
 - **N_teacher annealing:** 64->1280 over 100k iterations
 - **Changes from exp_1:** student_steps 4->8 (segments 12.5% instead of 25%), epochs 400->1000 (141k iterations, enough to complete annealing)
+- **Result:** Diversity emerging, loss trending down (0.04→0.02). Much better than exp_1. Still training.
+- **Checkpoints:** saved_state/checkpoint_{0,25,50,...}.pt
+
+### darcy_student/exp_3/
+- **Config:** student_steps=16, batch_size=64, lr=1e-4, epochs=1000
+- **Teacher:** darcy_teacher/exp_1/saved_state/checkpoint_200.pt (raw weights)
+- **CD params:** ema_rate=0.9999, x_var_frac=0.75, huber_epsilon=1e-4
+- **N_teacher annealing:** 64->1280 over 100k iterations
+- **Changes from exp_2:** student_steps 8->16 (segments 6.25% instead of 12.5%)
 - **Result:** TBD
 - **Checkpoints:** saved_state/checkpoint_{0,25,50,...}.pt
