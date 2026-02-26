@@ -27,7 +27,7 @@ import matplotlib.pyplot as plt
 from src.models.networks.unet.unet import UNetModelWrapper as UNetModel
 from src.models.vp_diffusion import VPDiffusionModel
 from src.models.consistency_models import MultistepConsistencyModel
-from src.models.diffusion_utils import addim_step, snr, ddim_step
+from src.models.diffusion_utils import ddim_step
 
 
 # ============================================================
@@ -140,7 +140,7 @@ def load_teacher(ckpt_path, device):
 
 
 def sample_teacher(teacher, noise_batches, device):
-    """Sample from teacher using 50 aDDIM steps. Returns normalized tensor."""
+    """Sample from teacher using 50 DDIM steps. Returns normalized tensor."""
     ts = th.linspace(1.0, 0.0, DDIM_STEPS + 1, device=device)
     all_samples = []
     with th.no_grad():
@@ -151,8 +151,7 @@ def sample_teacher(teacher, noise_batches, device):
                 t_batch = th.full((n,), ts[i].item(), device=device)
                 s_batch = th.full((n,), ts[i + 1].item(), device=device)
                 x_hat = teacher.predict_x(z, t_batch)
-                x_var = 0.1 / (2.0 + snr(t_batch, SCHEDULE_S))
-                z = addim_step(x_hat, z, x_var, t_batch, s_batch, SCHEDULE_S)
+                z = ddim_step(x_hat, z, t_batch, s_batch, SCHEDULE_S)
             all_samples.append(z.cpu())
     return th.cat(all_samples, dim=0)
 
