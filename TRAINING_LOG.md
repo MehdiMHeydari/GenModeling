@@ -40,5 +40,25 @@ All student runs stored under `darcy_student/`
 - **CD params:** ema_rate=0.9999, x_var_frac=0.75, huber_epsilon=1e-4
 - **N_teacher annealing:** 64->1280 over 100k iterations
 - **Changes from exp_2:** student_steps 8->16 (segments 6.25% instead of 12.5%)
+- **Result:** Similar to exp_2. 8 and 16 step students match each other but not teacher.
+- **Checkpoints:** saved_state/checkpoint_{0,25,50,...}.pt
+
+### darcy_student/exp_4/
+- **Config:** student_steps=16, batch_size=64, grad_accum=4 (effective batch=256), lr=1e-4, epochs=1000
+- **Teacher:** darcy_teacher/exp_1/saved_state/checkpoint_200.pt (raw weights)
+- **CD params:** ema_rate=0.9999, x_var_frac=0.75, huber_epsilon=1e-4
+- **N_teacher annealing:** 64->1280 over 100k iterations
+- **Changes from exp_3:** gradient accumulation (4 steps) to simulate 4x larger batch size
+- **Hypothesis:** Larger effective batch gives cleaner gradients, may reduce mode collapse
+- **Result:** TBD
+- **Checkpoints:** saved_state/checkpoint_{0,25,50,...}.pt
+
+### darcy_student/exp_5/
+- **Config:** student_steps=16, batch_size=64, grad_accum=8 (effective batch=512), lr=1e-4, epochs=1000
+- **Teacher:** darcy_teacher/exp_1/saved_state/checkpoint_200.pt (raw weights)
+- **CD params:** ema_rate=0.9999, x_var_frac=0.75, huber_epsilon=1e-4
+- **N_teacher annealing:** 64->1280 over 100k iterations
+- **Changes from exp_4:** gradient accumulation 4->8 (effective batch 256->512)
+- **Hypothesis:** Even larger effective batch, closer to paper's 2048
 - **Result:** TBD
 - **Checkpoints:** saved_state/checkpoint_{0,25,50,...}.pt

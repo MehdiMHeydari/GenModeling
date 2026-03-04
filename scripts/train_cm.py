@@ -160,22 +160,28 @@ def main(config_path):
     # --- Training loop ---
     num_epochs = config.train.num_epochs
     save_interval = config.train.checkpointing_dict.save_epoch_int
+    grad_accum = config.train.get("grad_accum_steps", 1)
     best_loss = float('inf')
 
     print(f"Starting CD training: {num_epochs} epochs, "
-          f"student_steps={config.cd.student_steps}")
+          f"student_steps={config.cd.student_steps}, "
+          f"grad_accum={grad_accum} (effective batch={config.dataloader.batch_size * grad_accum})")
 
     for epoch in tqdm(range(start_epoch, num_epochs), desc="CD Student"):
         model.network.train()
         total_loss = 0.0
 
-        for batch in train_loader:
-            loss = objective(model, batch, device=dev)
-            optim.zero_grad()
+        optim.zero_grad()
+        for batch_idx, batch in enumerate(train_loader):
+            loss = objective(model, batch, device=dev) / grad_accum
             loss.backward()
-            optim.step()
-            model.update_ema()
-            total_loss += loss.item()
+
+            if (batch_idx + 1) % grad_accum == 0 or (batch_idx + 1) == len(train_loader):
+                optim.step()
+                model.update_ema()
+                optim.zero_grad()
+
+            total_loss += loss.item() * grad_accum
 
         avg_loss = total_loss / len(train_loader)
         best_loss = min(best_loss, avg_loss)
