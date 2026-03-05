@@ -204,7 +204,7 @@ class MeanFlowMatchingLoss(Loss):
         delta = ut_pred - ut
         delta_l2_sq = delta.view(delta.shape[0], -1).pow(2).sum(dim=1)
         w = (1./ (delta_l2_sq + 1e-3)**(1 - self.gamma)).detach()
-        loss = (w * delta_l2_sq).sum()
+        loss = (w * delta_l2_sq).mean()
         return loss
 
 
