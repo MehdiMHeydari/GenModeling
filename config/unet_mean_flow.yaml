@@ -25,7 +25,7 @@ mean_flow:
 
 dataloader:
   datapath: "data/2D_DarcyFlow_beta1.0_Train.hdf5"
-  batch_size: 64
+  batch_size: 16
   dataset: "VF_FM"
   train_samples: 9000
 
@@ -34,7 +34,7 @@ optimizer:
 
 train:
   num_epochs: 1000
-  grad_accum_steps: 1
+  grad_accum_steps: 4
 
   logger_dict:
     format_strs: ["log", "tensorboard"]
