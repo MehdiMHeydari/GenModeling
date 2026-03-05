@@ -1,0 +1,42 @@
+device: cuda
+exp_num: 1
+path: "darcy_pd"
+th_seed: 1
+np_seed: 1
+
+unet:
+  dim: [1, 128, 128]
+  channel_mult: "1,  2,  4,  4"
+  num_channels: 64
+  num_res_blocks: 2
+  num_head_channels: 32
+  attention_resolutions: "32"
+  dropout: 0.0
+  use_new_attention_order: True
+  use_scale_shift_norm: True
+  class_cond: False
+  num_classes:
+
+pd:
+  teacher_checkpoint: "darcy_teacher/exp_1/saved_state/checkpoint_200.pt"
+  schedule_s: 0.008
+  start_steps: 128
+  end_steps: 2
+  epochs_per_round: 100
+
+dataloader:
+  datapath: "data/2D_DarcyFlow_beta1.0_Train.hdf5"
+  batch_size: 64
+  dataset: "VF_FM"
+  train_samples: 9000
+
+optimizer:
+  lr: 1e-4
+
+train:
+  grad_accum_steps: 1
+
+  checkpointing_dict:
+    restart: False
+    restart_round: null
+    save_round_checkpoints: True

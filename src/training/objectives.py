@@ -206,3 +206,75 @@ class MeanFlowMatchingLoss(Loss):
         w = (1./ (delta_l2_sq + 1e-3)**(1 - self.gamma)).detach()
         loss = (w * delta_l2_sq).sum()
         return loss
+
+
+# --------------------------------------------------------------------------- #
+# Progressive Distillation Loss (Salimans & Ho, ICLR 2022)                    #
+# --------------------------------------------------------------------------- #
+
+class ProgressiveDistillationLoss(Loss):
+    """
+    Progressive distillation loss: trains a student to match 2 teacher DDIM
+    steps in 1 forward pass. The target x_hat is computed via inv_ddim from
+    the result of 2 teacher steps.
+
+    Args:
+        teacher: Frozen VPDiffusionModel.
+        num_teacher_steps: Number of DDIM steps the teacher uses (N).
+        schedule_s: Cosine schedule offset.
+    """
+
+    def __init__(self, teacher, num_teacher_steps, schedule_s=0.008):
+        super().__init__(class_conditional=False)
+        self.teacher = teacher
+        self.N = num_teacher_steps
+        self.schedule_s = schedule_s
+
+    def __call__(self, model, batch, device):
+        from src.models.diffusion_utils import (
+            snr as _snr, q_sample, ddim_step, inv_ddim,
+            _broadcast_to_spatial,
+        )
+
+        _, x = batch
+        x = x.to(device)
+        B = x.shape[0]
+
+        half_N = self.N // 2
+
+        # Sample student step index: i in {1, ..., N/2}
+        step_idx = torch.randint(1, half_N + 1, (B,), device=device)
+
+        # Compute times in [0, 1]
+        t        = (2 * step_idx).float() / self.N
+        t_mid    = (2 * step_idx - 1).float() / self.N
+        t_target = (2 * step_idx - 2).float() / self.N
+
+        # Clamp to avoid schedule singularities
+        t = t.clamp(1e-4, 1 - 1e-4)
+        t_mid = t_mid.clamp(1e-4, 1 - 1e-4)
+        t_target = t_target.clamp(0, 1 - 1e-4)
+
+        # Forward diffuse: z_t = alpha_t * x + sigma_t * eps
+        z_t, _ = q_sample(x, t, s=self.schedule_s)
+
+        # Teacher: 2 DDIM steps (no grad)
+        with torch.no_grad():
+            x_hat_1 = self.teacher.predict_x(z_t, t, use_ema=True)
+            z_mid = ddim_step(x_hat_1, z_t, t, t_mid, self.schedule_s)
+
+            x_hat_2 = self.teacher.predict_x(z_mid, t_mid, use_ema=True)
+            z_target = ddim_step(x_hat_2, z_mid, t_mid, t_target, self.schedule_s)
+
+            # Target: x_hat that makes DDIM(x_hat, z_t, t -> t_target) = z_target
+            x_target = inv_ddim(z_target, z_t, t, t_target, self.schedule_s)
+
+        # Student prediction (with grad)
+        x_hat_student = model.predict_x(z_t, t)
+
+        # Weighted MSE loss (v-loss weighting: SNR + 1)
+        w = _snr(t, self.schedule_s) + 1.0
+        w = _broadcast_to_spatial(w, x)
+
+        loss = torch.mean(w * (x_hat_student - x_target.detach()) ** 2)
+        return loss
