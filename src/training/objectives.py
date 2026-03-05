@@ -179,3 +179,30 @@ class MultistepCDLoss(Loss):
         self._iteration += 1
 
         return loss
+
+
+# --------------------------------------------------------------------------- #
+# Mean Flow Matching Loss                                                      #
+# --------------------------------------------------------------------------- #
+
+class MeanFlowMatchingLoss(Loss):
+    """Adaptive MSE loss for mean flow matching."""
+
+    def __init__(self, class_conditional, gamma=0.):
+        super().__init__(class_conditional)
+        self.gamma = gamma
+
+    def __call__(self, model, batch, device):
+        if self.class_conditional:
+            x0, x1, y = batch
+            x0, x1, y = x0.to(device), x1.to(device), y.to(device)
+        else:
+            x0, x1 = batch
+            y = None
+            x0, x1 = x0.to(device), x1.to(device)
+        ut_pred, ut = model(x0, x1, y)
+        delta = ut_pred - ut
+        delta_l2_sq = delta.view(delta.shape[0], -1).pow(2).sum(dim=1)
+        w = (1./ (delta_l2_sq + 1e-3)**(1 - self.gamma)).detach()
+        loss = (w * delta_l2_sq).sum()
+        return loss

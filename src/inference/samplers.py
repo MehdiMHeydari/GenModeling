@@ -63,3 +63,32 @@ class MultistepCMSampler:
             z = ddim_step(x_hat, z, t_val, s_val, schedule_s)
 
         return z
+
+
+class MeanSampler:
+    """
+    A wrapper for mean flow models for few step generation
+    """
+
+    def __init__(self, model):
+        self.model = model
+
+    def drift(self, t_prev, t_next, x):
+        return self.model(t_next, t_prev, x)
+
+    @torch.no_grad()
+    def sample(self, initial_noise, **kwargs):
+
+        if "t_span_kwargs" not in kwargs.keys():
+            t_span = torch.linspace(0, 1, 2, device=initial_noise.device)
+
+        else:
+            t_sample = kwargs["t_span_kwargs"]
+            t_span = torch.linspace(**t_sample, device=initial_noise.device)
+
+        x = initial_noise
+
+        for t_prev, t_next in zip(t_span[:-1], t_span[1:]):
+            x = x + (t_next - t_prev) * self.drift(t_prev, t_next, x)
+
+        return x
