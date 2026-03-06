@@ -1,6 +1,6 @@
 """
-Compare CD exp_4 vs exp_5: sample from the latest checkpoint of each
-and plot a side-by-side grid.
+Compare CD exp_3 vs exp_4 vs exp_5: sample from the latest checkpoint of each
+and plot a side-by-side grid showing the effect of batch size.
 
 Usage:
     python scripts/compare_cd_exps.py [--gpu 2] [--n_samples 8]
@@ -102,45 +102,40 @@ def main():
 
     stats_dir = "darcy_teacher/exp_1/saved_state"
 
+    exps = {
+        "exp_3": {"dir": "darcy_student/exp_3", "label": "grad_accum=1\n(eff. batch 64)"},
+        "exp_4": {"dir": "darcy_student/exp_4", "label": "grad_accum=4\n(eff. batch 256)"},
+        "exp_5": {"dir": "darcy_student/exp_5", "label": "grad_accum=8\n(eff. batch 512)"},
+    }
+
     # Find latest checkpoints
-    exp4_ckpt = find_latest_checkpoint("darcy_student/exp_4")
-    exp5_ckpt = find_latest_checkpoint("darcy_student/exp_5")
+    for name, info in exps.items():
+        ckpt = find_latest_checkpoint(info["dir"])
+        assert ckpt, f"No checkpoints found for {name}"
+        epoch = re.search(r"checkpoint_(\d+)", ckpt).group(1)
+        info["ckpt"] = ckpt
+        info["epoch"] = epoch
+        print(f"{name}: {ckpt} (epoch {epoch})")
 
-    assert exp4_ckpt, "No checkpoints found for exp_4"
-    assert exp5_ckpt, "No checkpoints found for exp_5"
-
-    exp4_epoch = re.search(r"checkpoint_(\d+)", exp4_ckpt).group(1)
-    exp5_epoch = re.search(r"checkpoint_(\d+)", exp5_ckpt).group(1)
-
-    print(f"Exp 4: {exp4_ckpt} (epoch {exp4_epoch})")
-    print(f"Exp 5: {exp5_ckpt} (epoch {exp5_epoch})")
-
-    # Sample from both
-    print("Sampling from exp_4...")
-    samples_4 = load_and_sample(exp4_ckpt, n, device)
-    samples_4 = denormalize(samples_4, stats_dir)
-
-    print("Sampling from exp_5...")
-    samples_5 = load_and_sample(exp5_ckpt, n, device)
-    samples_5 = denormalize(samples_5, stats_dir)
+    # Sample from all
+    all_samples = {}
+    for name, info in exps.items():
+        print(f"Sampling from {name}...")
+        samples = load_and_sample(info["ckpt"], n, device)
+        all_samples[name] = denormalize(samples, stats_dir)
 
     # Plot side-by-side grid
-    fig, axes = plt.subplots(2, n, figsize=(2.5 * n, 5.5))
+    n_exps = len(exps)
+    fig, axes = plt.subplots(n_exps, n, figsize=(2.5 * n, 2.8 * n_exps))
 
-    for j in range(n):
-        img4 = samples_4[j, 0].numpy()
-        img5 = samples_5[j, 0].numpy()
+    for i, (name, info) in enumerate(exps.items()):
+        for j in range(n):
+            img = all_samples[name][j, 0].numpy()
+            axes[i, j].imshow(img, cmap="RdBu_r")
+            axes[i, j].axis("off")
+        axes[i, 0].set_ylabel(f"{name} (ep {info['epoch']})\n{info['label']}", fontsize=11)
 
-        axes[0, j].imshow(img4, cmap="RdBu_r")
-        axes[0, j].axis("off")
-
-        axes[1, j].imshow(img5, cmap="RdBu_r")
-        axes[1, j].axis("off")
-
-    axes[0, 0].set_ylabel(f"Exp 4 (ep {exp4_epoch})\ngrad_accum=4", fontsize=11)
-    axes[1, 0].set_ylabel(f"Exp 5 (ep {exp5_epoch})\ngrad_accum=8", fontsize=11)
-
-    fig.suptitle("CD Exp 4 vs Exp 5", fontsize=14, fontweight="bold")
+    fig.suptitle("CD: Effect of Batch Size (exp_3 vs exp_4 vs exp_5)", fontsize=14, fontweight="bold")
     plt.tight_layout()
     plt.savefig(args.save_path, dpi=150, bbox_inches="tight")
     print(f"Saved comparison to {args.save_path}")
