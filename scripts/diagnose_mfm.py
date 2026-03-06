@@ -113,6 +113,7 @@ def main():
 
     # --- Sampling with different step counts ---
     print("\n=== SAMPLING DIAGNOSTICS ===")
+    model.infer = True          # switch dispatch to sample(r, t, xt)
     model.network.eval()
     sampler = MeanSampler(model)
 
