@@ -65,6 +65,44 @@ class MultistepCMSampler:
         return z
 
 
+class RectifiedFlowSampler:
+    """
+    Euler ODE integrator for Rectified Flow models.
+
+    Integrates from t=0 (noise) to t=1 (data) using the learned velocity field.
+    Supports variable number of Euler steps for few-step generation.
+    """
+
+    def __init__(self, model):
+        self.model = model
+
+    @torch.no_grad()
+    def sample(self, initial_noise, num_steps=100, **kwargs):
+        """
+        Generate samples starting from z ~ N(0, I).
+
+        Args:
+            initial_noise: Tensor [B, C, H, W] of Gaussian noise.
+            num_steps: Number of Euler steps (more = higher quality).
+
+        Returns:
+            x: Generated samples [B, C, H, W].
+        """
+        x = initial_noise
+        dt = 1.0 / num_steps
+
+        for i in range(num_steps):
+            t = torch.full(
+                (x.shape[0],), i / num_steps,
+                device=x.device, dtype=x.dtype,
+            )
+            # model.sample(t, xt) returns the predicted velocity
+            v = self.model.sample(t, x, **kwargs)
+            x = x + dt * v
+
+        return x
+
+
 class MeanSampler:
     """
     A wrapper for mean flow models for few step generation
