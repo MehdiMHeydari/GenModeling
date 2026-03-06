@@ -252,7 +252,7 @@ Script: `python scripts/sample_cm.py config/unet_cm_sample.yaml`
 
 **Source code origin:** Ported from `~/Downloads/JianXun Repo/` (Prof. JianXun Wang's research group codebase).
 
-**Directory:** `darcy_mean_flow/exp_{1,2}/`
+**Directory:** `darcy_mean_flow/exp_{1,2,3}/`
 
 ### What it does
 Trains a model to predict the **average velocity** over a time interval `[t, r]` (dual time variables), rather than instantaneous velocity. This enables 1-step generation because the model directly predicts the full displacement from noise to data.
@@ -313,21 +313,35 @@ For 1-step: `x = noise + 1.0 * model(r=1, t=0, noise)` — single network evalua
 
 **Bug explanation:** The JianXun source uses `.sum()` with `batch_size=1` per GPU, so `.sum()` = `.mean()` for a single sample. With our `batch_size=16`, `.sum()` makes the loss 16x larger. Combined with 4x higher learning rate (1e-4 vs 2.5e-5) and grad_accum=4, the effective parameter updates were ~256x larger than JianXun's. The model could never converge.
 
-### MFM exp_2 (FIX — currently running)
+### MFM exp_2 (loss fix, low lr)
 | Parameter | Value |
 |-----------|-------|
 | batch_size | 16 |
 | grad_accum | 1 (none) |
 | effective batch | 16 |
-| lr | 2.5e-5 (matches JianXun source) |
+| lr | 2.5e-5 (matches JianXun base lr, but JianXun scales by world_size=4 → effective 1e-4) |
 | epochs | 1000 |
 | gamma | 0.0 |
 | t_schedule | uniform |
 | log_norm_args | [-0.4, 1.0] (available but not used with uniform) |
 | loss reduction | `.mean()` (FIXED) |
+| **Result** | **Still blurry blobs at epoch 25.** Diagnostics at epoch 25: `||delta||^2=27.13`, `adaptive_w=0.065`, loss saturated at `0.999935 ≈ 1.0`. The gamma=0 adaptive weight crushes gradients when errors are large. Additionally, lr=2.5e-5 is 4x lower than JianXun's effective lr (they use `lr * world_size = 2.5e-5 * 4 = 1e-4`). |
+
+### MFM exp_3 (corrected lr to match JianXun effective lr)
+| Parameter | Value |
+|-----------|-------|
+| batch_size | 16 |
+| grad_accum | 1 (none) |
+| effective batch | 16 |
+| lr | 1e-4 (matches JianXun's effective lr: 2.5e-5 * 4 GPUs) |
+| epochs | 1000 |
+| gamma | 0.0 |
+| t_schedule | uniform |
+| log_norm_args | [-0.4, 1.0] (available but not used with uniform) |
+| loss reduction | `.mean()` |
 | **Result** | TBD |
 
-Config file: `config/unet_mean_flow.yaml` (exp_num=2)
+Config file: `config/unet_mean_flow.yaml` (exp_num=3)
 
 ### MFM sampling config
 Config file: `config/unet_mean_flow_sample.yaml`
@@ -537,7 +551,11 @@ GenModeling-main/
 - **Bug:** `MeanFlowMatchingLoss` used `.sum()` over batch, causing gradients to scale with batch size
 - **Source:** JianXun Repo uses `batch_size=1` where `.sum()` = `.mean()`
 - **Fix:** Changed to `.mean()` in `src/training/objectives.py` line 207
-- **Also:** Lowered lr from 1e-4 to 2.5e-5 and removed grad_accum to match JianXun
+
+### 4. MFM learning rate too low in exp_2
+- **Issue:** exp_2 used lr=2.5e-5, matching JianXun's *base* lr. But JianXun scales lr by world_size (4 GPUs): `lr * world_size = 1e-4`
+- **Impact:** exp_2 was learning 4x slower than JianXun, compounded by gamma=0 adaptive weight suppression
+- **Fix:** exp_3 uses lr=1e-4 to match JianXun's effective learning rate
 
 ### 2. Teacher EMA vs raw weights
 - EMA weights (0.9999 decay) consistently performed worse than raw weights for this dataset

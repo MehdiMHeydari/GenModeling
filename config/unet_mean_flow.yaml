@@ -1,5 +1,5 @@
 device: cuda
-exp_num: 2
+exp_num: 3
 path: "darcy_mean_flow"
 th_seed: 1
 np_seed: 1
@@ -30,7 +30,7 @@ dataloader:
   train_samples: 9000
 
 optimizer:
-  lr: 2.5e-5
+  lr: 1e-4
 
 train:
   num_epochs: 1000
