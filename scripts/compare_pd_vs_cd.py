@@ -247,12 +247,18 @@ def main():
         for j in range(n):
             axes[i, j].imshow(samples[j, 0].numpy(), cmap="RdBu_r")
             axes[i, j].axis("off")
-        axes[i, 0].set_ylabel(label, fontsize=11, fontweight="bold",
-                               rotation=0, labelpad=80, va="center", ha="right")
+
+    # Use fig.text for row labels so they don't get clipped
+    plt.tight_layout(rect=[0.12, 0, 1, 0.95])
+    for i, (_, label) in enumerate(rows):
+        # Get the vertical center of each row in figure coords
+        bbox = axes[i, 0].get_position()
+        y_center = (bbox.y0 + bbox.y1) / 2
+        fig.text(0.01, y_center, label, fontsize=11, fontweight="bold",
+                 va="center", ha="left")
 
     fig.suptitle("Progressive Distillation vs Consistency Distillation",
                  fontsize=14, fontweight="bold", y=0.98)
-    plt.tight_layout(rect=[0.08, 0, 1, 0.95])
     plt.savefig(args.save_path, dpi=150, bbox_inches="tight")
     print(f"\nSaved to {args.save_path}")
 
