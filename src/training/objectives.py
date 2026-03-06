@@ -209,6 +209,44 @@ class MeanFlowMatchingLoss(Loss):
 
 
 # --------------------------------------------------------------------------- #
+# Rectified Flow Loss                                                          #
+# --------------------------------------------------------------------------- #
+
+class RectifiedFlowLoss(Loss):
+    """MSE loss for Rectified Flow training.
+
+    Supports two modes:
+    - Standard (round 1): data comes as (_, x1), noise is sampled fresh.
+    - Reflow (round 2+): data comes as (z, x) paired, uses stored noise.
+    """
+
+    def __init__(self, class_conditional, reflow=False):
+        super().__init__(class_conditional)
+        self.reflow = reflow
+
+    def __call__(self, model, batch, device):
+        if self.reflow:
+            # Paired data from reflow: (z_noise, x_data)
+            z, x = batch
+            z, x = z.to(device), x.to(device)
+            B = x.shape[0]
+            t = torch.rand(B, device=device)
+            t_broad = t.reshape(-1, *([1] * (x.dim() - 1)))
+            xt = t_broad * x + (1 - t_broad) * z
+            ut_target = x - z
+            ut_pred = model.network(t=t, x=xt)
+            loss = torch.mean((ut_pred - ut_target) ** 2)
+        else:
+            # Standard: (placeholder, data)
+            _, x = batch
+            x = x.to(device)
+            # model.forward -> get_training_objective(x0, x1) which ignores x0
+            ut_pred, ut = model(torch.zeros_like(x), x)
+            loss = torch.mean((ut_pred - ut) ** 2)
+        return loss
+
+
+# --------------------------------------------------------------------------- #
 # Progressive Distillation Loss (Salimans & Ho, ICLR 2022)                    #
 # --------------------------------------------------------------------------- #
 

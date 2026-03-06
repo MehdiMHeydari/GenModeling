@@ -1,0 +1,41 @@
+device: cuda
+exp_num: 1
+path: "darcy_rectified_flow_reflow"
+th_seed: 1
+np_seed: 1
+
+# Reflow mode: train on coupled (z, x) pairs
+reflow: True
+reflow_pairs_path: "darcy_rectified_flow/reflow_pairs.pt"
+
+unet:
+  dim: [1, 128, 128]
+  channel_mult: "1,  2,  4,  4"
+  num_channels: 64
+  num_res_blocks: 2
+  num_head_channels: 32
+  attention_resolutions: "32"
+  dropout: 0.0
+  use_new_attention_order: True
+  use_scale_shift_norm: True
+  class_cond: False
+  num_classes:
+
+dataloader:
+  batch_size: 64
+
+optimizer:
+  lr: 1e-4
+
+train:
+  num_epochs: 400
+
+  logger_dict:
+    format_strs: ["log", "tensorboard"]
+    log_print_freq: 5
+
+  checkpointing_dict:
+    restart: False
+    restart_epoch: null
+    save_epoch_int: 50
+    log_batch_int: 10
