@@ -172,7 +172,7 @@ def sample_cd_exp5(device, z):
 
 def sample_mfm(device, z):
     """Load MFM latest checkpoint and sample."""
-    save_dir = "darcy_mean_flow/exp_2/saved_state"
+    save_dir = "darcy_mean_flow/exp_3/saved_state"
     ckpt, epoch = find_latest_epoch_checkpoint(save_dir)
     if ckpt is None:
         print("  MFM: no checkpoints found, skipping")
