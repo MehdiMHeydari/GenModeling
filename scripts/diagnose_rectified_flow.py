@@ -150,7 +150,8 @@ def main():
     print("=" * 60)
 
     n_rows = len(available_exps) * len(EULER_STEPS)
-    fig, axes = plt.subplots(n_rows, n, figsize=(2.5 * n, 2.5 * n_rows))
+    # Extra left margin for row labels
+    fig, axes = plt.subplots(n_rows, n, figsize=(2.5 * n + 2, 2.8 * n_rows))
     if n_rows == 1:
         axes = axes[np.newaxis, :]
 
@@ -163,17 +164,21 @@ def main():
                 axes[row, j].imshow(img, cmap="RdBu_r")
                 axes[row, j].axis("off")
             epoch = available_exps[name]["epoch"]
-            axes[row, 0].set_ylabel(
-                f"{name}\nep {epoch}, {steps} step{'s' if steps > 1 else ''}",
-                fontsize=10,
+            label = (
+                f"{name}\n"
+                f"epoch {epoch}\n"
+                f"{steps} Euler step{'s' if steps > 1 else ''}"
             )
+            axes[row, 0].set_ylabel(label, fontsize=11, fontweight="bold", labelpad=10)
             row += 1
 
     fig.suptitle(
-        "Rectified Flow Diagnosis: Round 1 vs Reflow at Different Step Counts",
-        fontsize=13,
+        "Rectified Flow: Round 1 vs Reflow at Different Step Counts",
+        fontsize=14,
         fontweight="bold",
+        y=1.01,
     )
+    plt.subplots_adjust(left=0.12)
     plt.tight_layout()
     plt.savefig(args.save_path, dpi=150, bbox_inches="tight")
     print(f"\nSaved to {args.save_path}")
