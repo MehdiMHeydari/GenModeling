@@ -41,7 +41,7 @@ train:
     log_print_freq: 5
 
   checkpointing_dict:
-    restart: False
-    restart_epoch: null
+    restart: True
+    restart_epoch: 525
     save_epoch_int: 25
     log_batch_int: 10
