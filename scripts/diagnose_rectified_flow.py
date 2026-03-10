@@ -150,8 +150,7 @@ def main():
     print("=" * 60)
 
     n_rows = len(available_exps) * len(EULER_STEPS)
-    # Extra left margin for row labels
-    fig, axes = plt.subplots(n_rows, n, figsize=(2.5 * n + 2, 2.8 * n_rows))
+    fig, axes = plt.subplots(n_rows, n, figsize=(2.5 * n + 3, 2.8 * n_rows))
     if n_rows == 1:
         axes = axes[np.newaxis, :]
 
@@ -162,24 +161,42 @@ def main():
             for j in range(n):
                 img = samples[j, 0].numpy()
                 axes[row, j].imshow(img, cmap="RdBu_r")
-                axes[row, j].axis("off")
+                axes[row, j].set_xticks([])
+                axes[row, j].set_yticks([])
+                for spine in axes[row, j].spines.values():
+                    spine.set_visible(False)
             epoch = available_exps[name]["epoch"]
             label = (
                 f"{name}\n"
                 f"epoch {epoch}\n"
                 f"{steps} Euler step{'s' if steps > 1 else ''}"
             )
-            axes[row, 0].set_ylabel(label, fontsize=11, fontweight="bold", labelpad=10)
+            # Use fig.text anchored to the row's vertical center
+            row_center = axes[row, 0].get_position()
+            fig.text(
+                0.01,
+                (row_center.y0 + row_center.y1) / 2,
+                label,
+                fontsize=11,
+                fontweight="bold",
+                va="center",
+                ha="left",
+            )
             row += 1
 
     fig.suptitle(
         "Rectified Flow: Round 1 vs Reflow at Different Step Counts",
         fontsize=14,
         fontweight="bold",
-        y=1.01,
     )
-    plt.subplots_adjust(left=0.12)
-    plt.tight_layout()
+    plt.tight_layout(rect=[0.12, 0, 1, 0.97])
+    # Recompute text positions after tight_layout
+    row = 0
+    for name in available_exps:
+        for steps in EULER_STEPS:
+            pos = axes[row, 0].get_position()
+            fig.texts[row].set_position((0.01, (pos.y0 + pos.y1) / 2))
+            row += 1
     plt.savefig(args.save_path, dpi=150, bbox_inches="tight")
     print(f"\nSaved to {args.save_path}")
 
