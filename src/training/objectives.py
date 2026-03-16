@@ -62,14 +62,19 @@ class MultistepCDLoss(Loss):
     """
 
     def __init__(self, class_conditional, teacher_model, student_steps=2,
-                 x_var_frac=0.75, huber_epsilon=1e-4, schedule_s=0.008):
+                 x_var_frac=0.75, huber_epsilon=1e-4, schedule_s=0.008,
+                 moment_weight_mu=0.0, moment_weight_var=0.0):
         super().__init__(class_conditional)
         self.teacher = teacher_model
         self.student_steps = student_steps
         self.x_var_frac = x_var_frac
         self.huber_epsilon = huber_epsilon
         self.schedule_s = schedule_s
+        self.moment_weight_mu = moment_weight_mu
+        self.moment_weight_var = moment_weight_var
         self._iteration = 0
+        self.last_moment_mu = 0.0
+        self.last_moment_var = 0.0
 
     def _teacher_step_schedule(self):
         """
@@ -83,6 +88,29 @@ class MultistepCDLoss(Loss):
     def _pseudo_huber(self, x):
         """Pseudo-Huber loss: sqrt(x^2 + eps^2) - eps."""
         return torch.sqrt(x ** 2 + self.huber_epsilon ** 2) - self.huber_epsilon
+
+    def _moment_loss(self, x_hat_online, x):
+        """Batch-level moment matching: compare per-sample spatial statistics.
+
+        Returns (loss_mu, loss_var) separately so they can be weighted independently.
+        """
+        pred_flat = x_hat_online.flatten(1)  # [B, C*H*W]
+        real_flat = x.detach().flatten(1)
+
+        mu_pred = pred_flat.mean(dim=1)   # [B]
+        mu_real = real_flat.mean(dim=1)
+        var_pred = pred_flat.var(dim=1)
+        var_real = real_flat.var(dim=1)
+
+        # Match distribution of per-sample means
+        loss_mu = (mu_pred.mean() - mu_real.mean()) ** 2 \
+                + (mu_pred.var() - mu_real.var()) ** 2
+
+        # Match distribution of per-sample variances
+        loss_var = (var_pred.mean() - var_real.mean()) ** 2 \
+                 + (var_pred.var() - var_real.var()) ** 2
+
+        return loss_mu, loss_var
 
     def __call__(self, model, batch, device):
         """
@@ -175,7 +203,19 @@ class MultistepCDLoss(Loss):
 
         loss = torch.mean(w_t * self._pseudo_huber(x_diff))
 
-        # 14. Increment iteration counter
+        # 14. Moment-matching regularization (with warmup)
+        if self.moment_weight_mu > 0 or self.moment_weight_var > 0:
+            warmup_start = 10000
+            warmup_end = 20000
+            if self._iteration >= warmup_start:
+                ramp = min(1.0, (self._iteration - warmup_start) / (warmup_end - warmup_start))
+                loss_mu, loss_var = self._moment_loss(x_hat_online, x)
+                loss = loss + ramp * self.moment_weight_mu * loss_mu \
+                            + ramp * self.moment_weight_var * loss_var
+                self.last_moment_mu = loss_mu.item()
+                self.last_moment_var = loss_var.item()
+
+        # 15. Increment iteration counter
         self._iteration += 1
 
         return loss

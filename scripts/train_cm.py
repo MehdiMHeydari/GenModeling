@@ -131,6 +131,8 @@ def main(config_path):
         x_var_frac=config.cd.get("x_var_frac", 0.75),
         huber_epsilon=config.cd.get("huber_epsilon", 1e-4),
         schedule_s=schedule_s,
+        moment_weight_mu=config.cd.get("moment_weight_mu", 0.0),
+        moment_weight_var=config.cd.get("moment_weight_var", 0.0),
     )
 
     # --- Optimizer ---
@@ -187,8 +189,12 @@ def main(config_path):
         best_loss = min(best_loss, avg_loss)
         n_teacher = objective._teacher_step_schedule()
 
-        wandb.log({"loss": avg_loss, "best_loss": best_loss,
-                   "N_teacher": n_teacher, "epoch": epoch})
+        log_dict = {"loss": avg_loss, "best_loss": best_loss,
+                    "N_teacher": n_teacher, "epoch": epoch}
+        if config.cd.get("moment_weight_mu", 0) > 0 or config.cd.get("moment_weight_var", 0) > 0:
+            log_dict["moment_loss_mu"] = objective.last_moment_mu
+            log_dict["moment_loss_var"] = objective.last_moment_var
+        wandb.log(log_dict)
 
         if epoch % 5 == 0 or epoch == num_epochs - 1:
             tqdm.write(f"Epoch {epoch}: loss={avg_loss:.6f}, "
