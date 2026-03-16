@@ -129,7 +129,7 @@ def denormalize(samples, data_min, data_max):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--gpu", type=int, default=0)
+    parser.add_argument("--gpu", type=int, default=1)
     parser.add_argument("--n_samples", type=int, default=1000,
                         help="Number of samples for histogram (use 1000+ for smooth curves)")
     parser.add_argument("--n_show", type=int, default=6,
@@ -217,7 +217,7 @@ def main():
     fig.suptitle("CD Experiments: Sample Comparison (16-step sampling)",
                  fontsize=14, fontweight="bold")
     plt.tight_layout()
-    grid_path = os.path.join(args.output_dir, "cd_sample_grid.png")
+    grid_path = os.path.join(args.output_dir, "cd_batchsize_samples.png")
     plt.savefig(grid_path, dpi=150, bbox_inches="tight")
     plt.close()
     print(f"Saved {grid_path}")
@@ -267,7 +267,7 @@ def main():
     fig.suptitle("Darcy Flow: CD Experiment Distribution Comparison",
                  fontsize=15, fontweight="bold")
     plt.tight_layout()
-    hist_path = os.path.join(args.output_dir, "cd_histogram.png")
+    hist_path = os.path.join(args.output_dir, "cd_batchsize_histogram.png")
     plt.savefig(hist_path, dpi=150, bbox_inches="tight")
     plt.close()
     print(f"Saved {hist_path}")
