@@ -148,23 +148,12 @@ def main():
                               wspace=0.05, hspace=0.15,
                               left=0.06, right=0.98, top=0.93, bottom=0.02)
 
-    # Compute consistent color range across all samples
-    all_samples = []
-    for s in rf_results.values():
-        all_samples.append(denormalize(s, data_min, data_max))
-    if has_reflow:
-        for s in reflow_results.values():
-            all_samples.append(denormalize(s, data_min, data_max))
-    all_cat = th.cat(all_samples, dim=0)
-    vmin, vmax = all_cat.min().item(), all_cat.max().item()
-
     for row_idx, n_steps in enumerate(STEP_COUNTS):
         # RF samples
         rf_denorm = denormalize(rf_results[n_steps], data_min, data_max)
         for col_idx in range(args.n_show):
             ax = fig.add_subplot(gs[row_idx, col_idx])
-            ax.imshow(rf_denorm[col_idx, 0].numpy(), cmap="RdBu_r",
-                      vmin=vmin, vmax=vmax)
+            ax.imshow(rf_denorm[col_idx, 0].numpy(), cmap="RdBu_r")
             ax.axis("off")
             # Row label on leftmost column
             if col_idx == 0:
@@ -178,8 +167,7 @@ def main():
             for col_idx in range(args.n_show):
                 # +1 for spacer column
                 ax = fig.add_subplot(gs[row_idx, n_cols + 1 + col_idx])
-                ax.imshow(reflow_denorm[col_idx, 0].numpy(), cmap="RdBu_r",
-                          vmin=vmin, vmax=vmax)
+                ax.imshow(reflow_denorm[col_idx, 0].numpy(), cmap="RdBu_r")
                 ax.axis("off")
 
     # Column group titles
