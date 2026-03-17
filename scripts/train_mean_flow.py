@@ -145,6 +145,7 @@ def main(config_path):
             loss.backward()
 
             if (batch_idx + 1) % grad_accum == 0 or (batch_idx + 1) == len(train_loader):
+                th.nn.utils.clip_grad_norm_(model.network.parameters(), max_norm=1.0)
                 optim.step()
                 optim.zero_grad()
 
