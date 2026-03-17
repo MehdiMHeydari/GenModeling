@@ -191,21 +191,27 @@ def main():
     n_rows = len(active_exps) + 2  # +teacher +ground truth
     n_cols = args.n_show
 
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(2.5 * n_cols, 2.5 * n_rows))
+    fig, axes = plt.subplots(n_rows, n_cols,
+                             figsize=(2.5 * n_cols + 1.5, 2.5 * n_rows))
+    plt.subplots_adjust(left=0.12, wspace=0.05, hspace=0.15)
 
     row = 0
     # Ground truth
     for j in range(n_cols):
         axes[row, j].imshow(real_denorm[j, 0], cmap="RdBu_r")
         axes[row, j].axis("off")
-    axes[row, 0].set_ylabel("Ground Truth", fontsize=11, fontweight="bold")
+    axes[row, 0].text(-0.15, 0.5, "Ground Truth",
+                      transform=axes[row, 0].transAxes, fontsize=11,
+                      fontweight="bold", va="center", ha="right")
     row += 1
 
     # Teacher
     for j in range(n_cols):
         axes[row, j].imshow(teacher_denorm[j, 0], cmap="RdBu_r")
         axes[row, j].axis("off")
-    axes[row, 0].set_ylabel("Teacher\n(50 DDIM)", fontsize=11, fontweight="bold")
+    axes[row, 0].text(-0.15, 0.5, "Teacher\n(50 DDIM)",
+                      transform=axes[row, 0].transAxes, fontsize=11,
+                      fontweight="bold", va="center", ha="right")
     row += 1
 
     # CD experiments
@@ -214,8 +220,9 @@ def main():
         for j in range(n_cols):
             axes[row, j].imshow(all_samples[name][j, 0], cmap="RdBu_r")
             axes[row, j].axis("off")
-        axes[row, 0].set_ylabel(f"{info['label']}\n(ep {info['epoch']})",
-                                fontsize=10, fontweight="bold")
+        axes[row, 0].text(-0.15, 0.5, f"{info['label']}\n(ep {info['epoch']})",
+                          transform=axes[row, 0].transAxes, fontsize=10,
+                          fontweight="bold", va="center", ha="right")
         row += 1
 
     fig.suptitle("CD Moment-Matching: Sample Comparison (16-step sampling)",
