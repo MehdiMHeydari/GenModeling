@@ -152,15 +152,20 @@ class MultistepCDLoss(Loss):
             t_val = torch.full((z.shape[0],), i / T - 1e-4, device=device)
             s_val = torch.full((z.shape[0],), (i - 1) / T, device=device)
 
-            if i == grad_step:
-                # This step gets gradient
-                x_hat = model.predict_x(z.detach(), t_val, use_ema=False)
-                z = ddim_step(x_hat, z.detach(), t_val, s_val, self.schedule_s)
-            else:
-                # No gradient for this step
+            if i > grad_step:
+                # Before grad step: full no_grad
                 with torch.no_grad():
                     x_hat = model.predict_x(z, t_val, use_ema=False)
                     z = ddim_step(x_hat, z, t_val, s_val, self.schedule_s)
+            elif i == grad_step:
+                # Grad step: gradient flows through model prediction
+                x_hat = model.predict_x(z.detach(), t_val, use_ema=False)
+                z = ddim_step(x_hat, z.detach(), t_val, s_val, self.schedule_s)
+            else:
+                # After grad step: model no_grad, but z keeps its grad_fn
+                with torch.no_grad():
+                    x_hat = model.predict_x(z, t_val, use_ema=False)
+                z = ddim_step(x_hat.detach(), z, t_val, s_val, self.schedule_s)
 
         # Compute moments of generated samples
         flat = z.flatten(1)
