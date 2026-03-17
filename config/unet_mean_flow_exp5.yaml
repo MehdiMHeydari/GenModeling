@@ -1,5 +1,5 @@
 device: cuda:0
-exp_num: 4
+exp_num: 5
 path: "darcy_mean_flow"
 th_seed: 1
 np_seed: 1
@@ -19,7 +19,7 @@ unet:
   use_future_time_emb: True
 
 mean_flow:
-  gamma: 1.0
+  gamma: 0.5
   t_schedule: "uniform"
   log_norm_args: [-0.4, 1.0]
 
@@ -30,7 +30,7 @@ dataloader:
   train_samples: 9000
 
 optimizer:
-  lr: 1e-5
+  lr: 1e-4
 
 train:
   num_epochs: 1000
