@@ -133,7 +133,7 @@ def main():
                         help="Number of samples for histogram (use 1000+ for smooth curves)")
     parser.add_argument("--n_show", type=int, default=6,
                         help="Number of samples to show in the visual grid")
-    parser.add_argument("--output_dir", type=str, default="eval_moment_comparison")
+    parser.add_argument("--output_dir", type=str, default="eval_moment_ddim")
     args = parser.parse_args()
 
     device = th.device(f"cuda:{args.gpu}" if th.cuda.is_available() else "cpu")
