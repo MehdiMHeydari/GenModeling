@@ -29,7 +29,7 @@ cd:
   moment_weight_var: 25.0
   teacher_moments_path: "darcy_teacher/exp_1/saved_state/teacher_moments.pt"
   moment_every: 50
-  moment_batch_size: 32
+  moment_batch_size: 16
 
 dataloader:
   datapath: "data/2D_DarcyFlow_beta1.0_Train.hdf5"

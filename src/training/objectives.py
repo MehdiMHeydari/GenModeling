@@ -119,28 +119,46 @@ class MultistepCDLoss(Loss):
         """Pseudo-Huber loss: sqrt(x^2 + eps^2) - eps."""
         return torch.sqrt(x ** 2 + self.huber_epsilon ** 2) - self.huber_epsilon
 
-    def _sample_moment_loss(self, model, device):
+    def sample_moment_loss(self, model, device):
         """Run the full student sampling chain and compare moments to teacher.
 
-        Generates `moment_batch_size` samples using the 16-step chain (EMA network),
-        then computes moment gap vs pre-computed teacher targets.
+        Generates `moment_batch_size` samples using the 16-step chain.
+        First T-1 steps run with no_grad (since z is detached between steps,
+        gradient only flows through the last step anyway). This saves memory.
 
-        Returns (loss_mu, loss_var) as differentiable tensors.
+        Should be called AFTER cd_loss.backward() so the CD graph is freed.
+
+        Returns (loss_mu, loss_var) as differentiable tensors, or None if
+        this iteration is not a moment iteration.
         """
+        if not (self.moment_weight_mu > 0 or self.moment_weight_var > 0):
+            return None
+        if self.teacher_mu_mean is None:
+            return None
+        # _iteration is incremented in __call__, so check the value after increment
+        if (self._iteration - 1) % self.moment_every != 0:
+            return None
+
         from src.models.diffusion_utils import ddim_step
 
         T = self.student_steps
         z = torch.randn(self.moment_batch_size, 1, 128, 128, device=device)
 
-        # Run the full sampling chain — use online network (not EMA) so gradients flow
-        for i in range(T, 0, -1):
-            t_val = torch.full((z.shape[0],), i / T - 1e-4, device=device)
-            s_val = torch.full((z.shape[0],), (i - 1) / T, device=device)
-            x_hat = model.predict_x(z, t_val, use_ema=False)
-            # Detach z between steps so gradient only flows through current step's prediction
-            z = ddim_step(x_hat, z.detach(), t_val, s_val, self.schedule_s)
+        # First T-1 steps with no_grad (saves memory, gradient can't flow anyway)
+        with torch.no_grad():
+            for i in range(T, 1, -1):
+                t_val = torch.full((z.shape[0],), i / T - 1e-4, device=device)
+                s_val = torch.full((z.shape[0],), (i - 1) / T, device=device)
+                x_hat = model.predict_x(z, t_val, use_ema=False)
+                z = ddim_step(x_hat, z, t_val, s_val, self.schedule_s)
 
-        # z is now the final generated samples
+        # Last step WITH gradient
+        t_val = torch.full((z.shape[0],), 1 / T - 1e-4, device=device)
+        s_val = torch.full((z.shape[0],), 0.0, device=device)
+        x_hat = model.predict_x(z.detach(), t_val, use_ema=False)
+        z = ddim_step(x_hat, z.detach(), t_val, s_val, self.schedule_s)
+
+        # Compute moments of generated samples
         flat = z.flatten(1)
         mu_student = flat.mean(dim=1)
         var_student = flat.var(dim=1)
@@ -152,7 +170,10 @@ class MultistepCDLoss(Loss):
         loss_var = (var_student.mean() - self.teacher_var_mean) ** 2 \
                  + (var_student.var() - self.teacher_var_var) ** 2
 
-        return loss_mu, loss_var
+        self.last_moment_mu = loss_mu.item()
+        self.last_moment_var = loss_var.item()
+
+        return self.moment_weight_mu * loss_mu + self.moment_weight_var * loss_var
 
     def __call__(self, model, batch, device):
         """
@@ -245,17 +266,7 @@ class MultistepCDLoss(Loss):
 
         loss = torch.mean(w_t * self._pseudo_huber(x_diff))
 
-        # 14. Sampling-based moment-matching regularization
-        if (self.moment_weight_mu > 0 or self.moment_weight_var > 0) \
-                and self.teacher_mu_mean is not None \
-                and self._iteration % self.moment_every == 0:
-            loss_mu, loss_var = self._sample_moment_loss(model, device)
-            loss = loss + self.moment_weight_mu * loss_mu \
-                        + self.moment_weight_var * loss_var
-            self.last_moment_mu = loss_mu.item()
-            self.last_moment_var = loss_var.item()
-
-        # 15. Increment iteration counter
+        # 14. Increment iteration counter
         self._iteration += 1
 
         return loss

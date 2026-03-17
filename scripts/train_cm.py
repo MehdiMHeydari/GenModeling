@@ -181,6 +181,11 @@ def main(config_path):
             loss = objective(model, batch, device=dev) / grad_accum
             loss.backward()
 
+            # Sampling-based moment loss (separate backward, after CD graph is freed)
+            moment_loss = objective.sample_moment_loss(model, dev)
+            if moment_loss is not None:
+                moment_loss.backward()
+
             if (batch_idx + 1) % grad_accum == 0 or (batch_idx + 1) == len(train_loader):
                 optim.step()
                 model.update_ema()
