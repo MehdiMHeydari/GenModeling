@@ -94,10 +94,7 @@ def load_and_sample_teacher(initial_noise, device):
     network = UNetModel(**UNET_CFG)
     teacher = VPDiffusionModel(network=network, schedule_s=SCHEDULE_S, infer=True)
     state = th.load(TEACHER_CKPT, map_location="cpu", weights_only=True)
-    if "ema_state_dict" in state:
-        teacher.network.load_state_dict(state["ema_state_dict"])
-    else:
-        teacher.network.load_state_dict(state["model_state_dict"])
+    teacher.network.load_state_dict(state["model_state_dict"])
     teacher.to(device).eval()
 
     ts = th.linspace(1.0, 0.0, DDIM_STEPS + 1, device=device)
