@@ -52,6 +52,10 @@ class MultistepCDLoss(Loss):
     Orchestrates the teacher model, online student, and EMA target to
     compute the consistency distillation objective.
 
+    Optionally includes a sampling-based moment-matching regularizer that
+    runs the full student sampling chain every `moment_every` iterations
+    and penalizes deviation from pre-computed teacher distribution moments.
+
     Args:
         class_conditional: Whether the model is class-conditional.
         teacher_model: Frozen VPDiffusionModel (the teacher).
@@ -59,11 +63,18 @@ class MultistepCDLoss(Loss):
         x_var_frac: Eta parameter for aDDIM (default 0.75).
         huber_epsilon: Epsilon for pseudo-Huber loss (default 1e-4).
         schedule_s: Cosine schedule offset.
+        moment_weight_mu: Weight for mean-matching loss (0 = off).
+        moment_weight_var: Weight for variance-matching loss (0 = off).
+        teacher_moments_path: Path to pre-computed teacher_moments.pt.
+        moment_every: Run sampling-based moment loss every N iterations.
+        moment_batch_size: Number of samples to generate for moment computation.
     """
 
     def __init__(self, class_conditional, teacher_model, student_steps=2,
                  x_var_frac=0.75, huber_epsilon=1e-4, schedule_s=0.008,
-                 moment_weight_mu=0.0, moment_weight_var=0.0):
+                 moment_weight_mu=0.0, moment_weight_var=0.0,
+                 teacher_moments_path=None, moment_every=50,
+                 moment_batch_size=32):
         super().__init__(class_conditional)
         self.teacher = teacher_model
         self.student_steps = student_steps
@@ -72,9 +83,28 @@ class MultistepCDLoss(Loss):
         self.schedule_s = schedule_s
         self.moment_weight_mu = moment_weight_mu
         self.moment_weight_var = moment_weight_var
+        self.moment_every = moment_every
+        self.moment_batch_size = moment_batch_size
         self._iteration = 0
         self.last_moment_mu = 0.0
         self.last_moment_var = 0.0
+
+        # Load pre-computed teacher moments
+        if teacher_moments_path is not None and (moment_weight_mu > 0 or moment_weight_var > 0):
+            import os
+            assert os.path.exists(teacher_moments_path), \
+                f"Teacher moments not found: {teacher_moments_path}"
+            teacher_moments = torch.load(teacher_moments_path, map_location="cpu",
+                                         weights_only=True)
+            self.teacher_mu_mean = teacher_moments["mu_mean"]
+            self.teacher_mu_var = teacher_moments["mu_var"]
+            self.teacher_var_mean = teacher_moments["var_mean"]
+            self.teacher_var_var = teacher_moments["var_var"]
+            print(f"Loaded teacher moments from {teacher_moments_path}")
+            print(f"  target mu:  mean={self.teacher_mu_mean:.6f}, var={self.teacher_mu_var:.6f}")
+            print(f"  target var: mean={self.teacher_var_mean:.6f}, var={self.teacher_var_var:.6f}")
+        else:
+            self.teacher_mu_mean = None
 
     def _teacher_step_schedule(self):
         """
@@ -89,26 +119,38 @@ class MultistepCDLoss(Loss):
         """Pseudo-Huber loss: sqrt(x^2 + eps^2) - eps."""
         return torch.sqrt(x ** 2 + self.huber_epsilon ** 2) - self.huber_epsilon
 
-    def _moment_loss(self, x_hat_online, x):
-        """Batch-level moment matching: compare per-sample spatial statistics.
+    def _sample_moment_loss(self, model, device):
+        """Run the full student sampling chain and compare moments to teacher.
 
-        Returns (loss_mu, loss_var) separately so they can be weighted independently.
+        Generates `moment_batch_size` samples using the 16-step chain (EMA network),
+        then computes moment gap vs pre-computed teacher targets.
+
+        Returns (loss_mu, loss_var) as differentiable tensors.
         """
-        pred_flat = x_hat_online.flatten(1)  # [B, C*H*W]
-        real_flat = x.detach().flatten(1)
+        from src.models.diffusion_utils import ddim_step
 
-        mu_pred = pred_flat.mean(dim=1)   # [B]
-        mu_real = real_flat.mean(dim=1)
-        var_pred = pred_flat.var(dim=1)
-        var_real = real_flat.var(dim=1)
+        T = self.student_steps
+        z = torch.randn(self.moment_batch_size, 1, 128, 128, device=device)
 
-        # Match distribution of per-sample means
-        loss_mu = (mu_pred.mean() - mu_real.mean()) ** 2 \
-                + (mu_pred.var() - mu_real.var()) ** 2
+        # Run the full sampling chain — use online network (not EMA) so gradients flow
+        for i in range(T, 0, -1):
+            t_val = torch.full((z.shape[0],), i / T - 1e-4, device=device)
+            s_val = torch.full((z.shape[0],), (i - 1) / T, device=device)
+            x_hat = model.predict_x(z, t_val, use_ema=False)
+            # Detach z between steps so gradient only flows through current step's prediction
+            z = ddim_step(x_hat, z.detach(), t_val, s_val, self.schedule_s)
 
-        # Match distribution of per-sample variances
-        loss_var = (var_pred.mean() - var_real.mean()) ** 2 \
-                 + (var_pred.var() - var_real.var()) ** 2
+        # z is now the final generated samples
+        flat = z.flatten(1)
+        mu_student = flat.mean(dim=1)
+        var_student = flat.var(dim=1)
+
+        # Compare to teacher targets
+        loss_mu = (mu_student.mean() - self.teacher_mu_mean) ** 2 \
+                + (mu_student.var() - self.teacher_mu_var) ** 2
+
+        loss_var = (var_student.mean() - self.teacher_var_mean) ** 2 \
+                 + (var_student.var() - self.teacher_var_var) ** 2
 
         return loss_mu, loss_var
 
@@ -203,17 +245,15 @@ class MultistepCDLoss(Loss):
 
         loss = torch.mean(w_t * self._pseudo_huber(x_diff))
 
-        # 14. Moment-matching regularization (with warmup)
-        if self.moment_weight_mu > 0 or self.moment_weight_var > 0:
-            warmup_start = 10000
-            warmup_end = 20000
-            if self._iteration >= warmup_start:
-                ramp = min(1.0, (self._iteration - warmup_start) / (warmup_end - warmup_start))
-                loss_mu, loss_var = self._moment_loss(x_hat_online, x)
-                loss = loss + ramp * self.moment_weight_mu * loss_mu \
-                            + ramp * self.moment_weight_var * loss_var
-                self.last_moment_mu = loss_mu.item()
-                self.last_moment_var = loss_var.item()
+        # 14. Sampling-based moment-matching regularization
+        if (self.moment_weight_mu > 0 or self.moment_weight_var > 0) \
+                and self.teacher_mu_mean is not None \
+                and self._iteration % self.moment_every == 0:
+            loss_mu, loss_var = self._sample_moment_loss(model, device)
+            loss = loss + self.moment_weight_mu * loss_mu \
+                        + self.moment_weight_var * loss_var
+            self.last_moment_mu = loss_mu.item()
+            self.last_moment_var = loss_var.item()
 
         # 15. Increment iteration counter
         self._iteration += 1
