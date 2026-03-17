@@ -122,14 +122,14 @@ class MultistepCDLoss(Loss):
     def sample_moment_loss(self, model, device):
         """Run the full student sampling chain and compare moments to teacher.
 
-        Generates `moment_batch_size` samples using the 16-step chain.
-        First T-1 steps run with no_grad (since z is detached between steps,
-        gradient only flows through the last step anyway). This saves memory.
+        Generates `moment_batch_size` samples using the T-step chain.
+        To save memory, we randomly pick ONE step to allow gradients through
+        and run all other steps with no_grad. Over many iterations, every step
+        in the chain gets gradient signal.
 
         Should be called AFTER cd_loss.backward() so the CD graph is freed.
 
-        Returns (loss_mu, loss_var) as differentiable tensors, or None if
-        this iteration is not a moment iteration.
+        Returns weighted moment loss tensor, or None if not a moment iteration.
         """
         if not (self.moment_weight_mu > 0 or self.moment_weight_var > 0):
             return None
@@ -140,23 +140,27 @@ class MultistepCDLoss(Loss):
             return None
 
         from src.models.diffusion_utils import ddim_step
+        import random
 
         T = self.student_steps
         z = torch.randn(self.moment_batch_size, 1, 128, 128, device=device)
 
-        # First T-1 steps with no_grad (saves memory, gradient can't flow anyway)
-        with torch.no_grad():
-            for i in range(T, 1, -1):
-                t_val = torch.full((z.shape[0],), i / T - 1e-4, device=device)
-                s_val = torch.full((z.shape[0],), (i - 1) / T, device=device)
-                x_hat = model.predict_x(z, t_val, use_ema=False)
-                z = ddim_step(x_hat, z, t_val, s_val, self.schedule_s)
+        # Randomly pick which step gets gradient (1-indexed: T down to 1)
+        grad_step = random.randint(1, T)
 
-        # Last step WITH gradient
-        t_val = torch.full((z.shape[0],), 1 / T - 1e-4, device=device)
-        s_val = torch.full((z.shape[0],), 0.0, device=device)
-        x_hat = model.predict_x(z.detach(), t_val, use_ema=False)
-        z = ddim_step(x_hat, z.detach(), t_val, s_val, self.schedule_s)
+        for i in range(T, 0, -1):
+            t_val = torch.full((z.shape[0],), i / T - 1e-4, device=device)
+            s_val = torch.full((z.shape[0],), (i - 1) / T, device=device)
+
+            if i == grad_step:
+                # This step gets gradient
+                x_hat = model.predict_x(z.detach(), t_val, use_ema=False)
+                z = ddim_step(x_hat, z.detach(), t_val, s_val, self.schedule_s)
+            else:
+                # No gradient for this step
+                with torch.no_grad():
+                    x_hat = model.predict_x(z, t_val, use_ema=False)
+                    z = ddim_step(x_hat, z, t_val, s_val, self.schedule_s)
 
         # Compute moments of generated samples
         flat = z.flatten(1)
