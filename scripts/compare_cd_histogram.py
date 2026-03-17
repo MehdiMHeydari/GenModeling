@@ -25,7 +25,7 @@ from src.models.networks.unet.unet import UNetModelWrapper as UNetModel
 from src.models.vp_diffusion import VPDiffusionModel
 from src.models.consistency_models import MultistepConsistencyModel
 from src.inference.samplers import MultistepCMSampler
-from src.models.diffusion_utils import addim_step, snr
+from src.models.diffusion_utils import ddim_step
 
 
 UNET_CFG = dict(
@@ -112,8 +112,7 @@ def load_and_sample_teacher(initial_noise, device):
                 t_batch = th.full((n,), ts[step].item(), device=device)
                 s_batch = th.full((n,), ts[step + 1].item(), device=device)
                 x_hat = teacher.predict_x(z, t_batch)
-                x_var = 0.1 / (2.0 + snr(t_batch, SCHEDULE_S))
-                z = addim_step(x_hat, z, x_var, t_batch, s_batch, SCHEDULE_S)
+                z = ddim_step(x_hat, z, t_batch, s_batch, SCHEDULE_S)
             all_samples.append(z.cpu())
 
     del teacher, network
