@@ -131,7 +131,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--gpu", type=int, default=7)
     parser.add_argument("--n_samples", type=int, default=1000)
-    parser.add_argument("--n_show", type=int, default=6)
+    parser.add_argument("--n_show", type=int, default=16)
     parser.add_argument("--mfm_steps", type=int, default=2,
                         help="Number of MFM sampling steps for grid/histogram")
     parser.add_argument("--output_dir", type=str, default="eval_mfm_compare")
@@ -159,6 +159,11 @@ def main():
     results = {}
     results["Ground Truth"] = real_denorm[:args.n_samples]
 
+    # Teacher
+    print("Sampling teacher (50 DDIM)...")
+    teacher_samples = sample_teacher(initial_noise, device)
+    results["Teacher\n(50 DDIM)"] = denormalize(teacher_samples, data_min, data_max)
+
     # MFM experiments
     for name, info in MFM_EXPS.items():
         ckpt, epoch = find_latest_checkpoint(info["dir"])
@@ -179,8 +184,8 @@ def main():
     n_cols = args.n_show
 
     fig, axes = plt.subplots(n_rows, n_cols,
-                             figsize=(2.5 * n_cols + 1.5, 2.5 * n_rows))
-    plt.subplots_adjust(left=0.15, wspace=0.05, hspace=0.15)
+                             figsize=(1.8 * n_cols + 2, 2.5 * n_rows))
+    plt.subplots_adjust(left=0.10, wspace=0.03, hspace=0.15)
 
     for row, name in enumerate(model_names):
         samples = results[name]
