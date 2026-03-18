@@ -145,7 +145,7 @@ def main(config_path):
             loss.backward()
 
             if (batch_idx + 1) % grad_accum == 0 or (batch_idx + 1) == len(train_loader):
-                th.nn.utils.clip_grad_norm_(model.network.parameters(), max_norm=1.0)
+                grad_norm = th.nn.utils.clip_grad_norm_(model.network.parameters(), max_norm=1.0)
                 optim.step()
                 optim.zero_grad()
 
@@ -154,7 +154,8 @@ def main(config_path):
         avg_loss = total_loss / len(train_loader)
         best_loss = min(best_loss, avg_loss)
 
-        wandb.log({"loss": avg_loss, "best_loss": best_loss, "epoch": epoch})
+        wandb.log({"loss": avg_loss, "best_loss": best_loss,
+                    "grad_norm": grad_norm.item(), "epoch": epoch})
 
         if epoch % 5 == 0 or epoch == num_epochs - 1:
             tqdm.write(f"Epoch {epoch}: loss={avg_loss:.6f}, "
