@@ -129,7 +129,7 @@ def sample_mfm(ckpt_path, initial_noise, device, n_steps=2):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--gpu", type=int, default=0)
+    parser.add_argument("--gpu", type=int, default=7)
     parser.add_argument("--n_samples", type=int, default=1000)
     parser.add_argument("--n_show", type=int, default=6)
     parser.add_argument("--mfm_steps", type=int, default=2,
@@ -158,11 +158,6 @@ def main():
     # Collect results: {label: denorm_samples}
     results = {}
     results["Ground Truth"] = real_denorm[:args.n_samples]
-
-    # Teacher
-    print("Sampling teacher (50 DDIM)...")
-    teacher_samples = sample_teacher(initial_noise, device)
-    results["Teacher\n(50 DDIM)"] = denormalize(teacher_samples, data_min, data_max)
 
     # MFM experiments
     for name, info in MFM_EXPS.items():
