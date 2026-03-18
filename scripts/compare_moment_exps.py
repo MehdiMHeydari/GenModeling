@@ -130,7 +130,7 @@ def main():
                         help="Number of samples for histogram (use 1000+ for smooth curves)")
     parser.add_argument("--n_show", type=int, default=6,
                         help="Number of samples to show in the visual grid")
-    parser.add_argument("--output_dir", type=str, default="eval_moment_v2")
+    parser.add_argument("--output_dir", type=str, default="eval_moment_v3")
     args = parser.parse_args()
 
     device = th.device(f"cuda:{args.gpu}" if th.cuda.is_available() else "cpu")
@@ -156,12 +156,12 @@ def main():
     exps = {
         "exp_3": {"dir": "darcy_student/exp_3",
                   "label": "CD baseline\n(no moment)"},
-        "exp_6": {"dir": "darcy_student/exp_6",
-                  "label": "Moment exp6\n(var=0.1)"},
-        "exp_7": {"dir": "darcy_student/exp_7",
-                  "label": "Moment exp7\n(var=1.0)"},
-        "exp_9": {"dir": "darcy_student/exp_9",
-                  "label": "Moment exp9\n(mu=0.1, var=1.0)"},
+        "exp_16": {"dir": "darcy_student/exp_16",
+                   "label": "Moment exp16\n(var=150)"},
+        "exp_17": {"dir": "darcy_student/exp_17",
+                   "label": "Moment exp17\n(var=200)"},
+        "exp_18": {"dir": "darcy_student/exp_18",
+                   "label": "Moment exp18\n(mu=8, var=150)"},
     }
 
     all_samples = {}
@@ -195,7 +195,7 @@ def main():
     row = 0
     # Ground truth
     for j in range(n_cols):
-        axes[row, j].imshow(real_denorm[j, 0], cmap="RdBu_r")
+        axes[row, j].imshow(real_denorm[j, 0], cmap="viridis")
         axes[row, j].axis("off")
     axes[row, 0].text(-0.15, 0.5, "Ground Truth",
                       transform=axes[row, 0].transAxes, fontsize=11,
@@ -204,7 +204,7 @@ def main():
 
     # Teacher
     for j in range(n_cols):
-        axes[row, j].imshow(teacher_denorm[j, 0], cmap="RdBu_r")
+        axes[row, j].imshow(teacher_denorm[j, 0], cmap="viridis")
         axes[row, j].axis("off")
     axes[row, 0].text(-0.15, 0.5, "Teacher\n(50 DDIM)",
                       transform=axes[row, 0].transAxes, fontsize=11,
@@ -215,14 +215,14 @@ def main():
     for name in active_exps:
         info = exps[name]
         for j in range(n_cols):
-            axes[row, j].imshow(all_samples[name][j, 0], cmap="RdBu_r")
+            axes[row, j].imshow(all_samples[name][j, 0], cmap="viridis")
             axes[row, j].axis("off")
         axes[row, 0].text(-0.15, 0.5, f"{info['label']}\n(ep {info['epoch']})",
                           transform=axes[row, 0].transAxes, fontsize=10,
                           fontweight="bold", va="center", ha="right")
         row += 1
 
-    fig.suptitle("CD Moment-Matching: Sample Comparison (16-step sampling)",
+    fig.suptitle("CD Moment-Matching v3: Gradient Checkpointed (16-step sampling)",
                  fontsize=14, fontweight="bold")
     plt.tight_layout()
     grid_path = os.path.join(args.output_dir, "moment_samples.png")
@@ -239,18 +239,18 @@ def main():
         "Ground Truth": "gray",
         "Teacher (50 DDIM)": "tab:blue",
         "CD baseline (no moment)": "tab:red",
-        "Moment exp6 (var=0.1)": "tab:orange",
-        "Moment exp7 (var=1.0)": "tab:green",
-        "Moment exp9 (mu=0.1, var=1.0)": "tab:purple",
+        "Moment exp16 (var=150)": "tab:orange",
+        "Moment exp17 (var=200)": "tab:green",
+        "Moment exp18 (mu=8, var=150)": "tab:purple",
     }
 
     hist_data = {"Ground Truth": real_denorm.flatten(),
                  "Teacher (50 DDIM)": teacher_denorm.flatten()}
     label_map = {
         "exp_3": "CD baseline (no moment)",
-        "exp_6": "Moment exp6 (var=0.1)",
-        "exp_7": "Moment exp7 (var=1.0)",
-        "exp_9": "Moment exp9 (mu=0.1, var=1.0)",
+        "exp_16": "Moment exp16 (var=150)",
+        "exp_17": "Moment exp17 (var=200)",
+        "exp_18": "Moment exp18 (mu=8, var=150)",
     }
     for name in active_exps:
         hist_data[label_map[name]] = all_samples[name].flatten()
