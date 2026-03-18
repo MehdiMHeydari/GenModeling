@@ -35,7 +35,7 @@ optimizer:
 train:
   num_epochs: 1000
   grad_accum_steps: 1
-  grad_clip_max_norm: 500.0
+  grad_clip_max_norm: 2000.0
 
   logger_dict:
     format_strs: ["log", "tensorboard"]
