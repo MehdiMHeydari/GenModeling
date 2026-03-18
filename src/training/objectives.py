@@ -122,10 +122,10 @@ class MultistepCDLoss(Loss):
     def sample_moment_loss(self, model, device):
         """Run the full student sampling chain and compare moments to teacher.
 
-        Generates `moment_batch_size` samples using the T-step chain.
-        To save memory, we randomly pick ONE step to allow gradients through
-        and run all other steps with no_grad. Over many iterations, every step
-        in the chain gets gradient signal.
+        Uses gradient checkpointing to backprop through ALL T steps without
+        storing all intermediate activations. Each step's activations are
+        recomputed during backward, so peak memory is ~2x one forward pass
+        instead of 16x.
 
         Should be called AFTER cd_loss.backward() so the CD graph is freed.
 
@@ -135,37 +135,24 @@ class MultistepCDLoss(Loss):
             return None
         if self.teacher_mu_mean is None:
             return None
-        # _iteration is incremented in __call__, so check the value after increment
         if (self._iteration - 1) % self.moment_every != 0:
             return None
 
         from src.models.diffusion_utils import ddim_step
-        import random
+        from torch.utils.checkpoint import checkpoint
 
         T = self.student_steps
+        schedule_s = self.schedule_s
         z = torch.randn(self.moment_batch_size, 1, 128, 128, device=device)
 
-        # Randomly pick which step gets gradient (1-indexed: T down to 1)
-        grad_step = random.randint(1, T)
+        def _step_fn(z_in, t_val, s_val):
+            x_hat = model.predict_x(z_in, t_val, use_ema=False)
+            return ddim_step(x_hat, z_in, t_val, s_val, schedule_s)
 
         for i in range(T, 0, -1):
             t_val = torch.full((z.shape[0],), i / T - 1e-4, device=device)
             s_val = torch.full((z.shape[0],), (i - 1) / T, device=device)
-
-            if i > grad_step:
-                # Before grad step: full no_grad
-                with torch.no_grad():
-                    x_hat = model.predict_x(z, t_val, use_ema=False)
-                    z = ddim_step(x_hat, z, t_val, s_val, self.schedule_s)
-            elif i == grad_step:
-                # Grad step: gradient flows through model prediction
-                x_hat = model.predict_x(z.detach(), t_val, use_ema=False)
-                z = ddim_step(x_hat, z.detach(), t_val, s_val, self.schedule_s)
-            else:
-                # After grad step: model no_grad, but z keeps its grad_fn
-                with torch.no_grad():
-                    x_hat = model.predict_x(z, t_val, use_ema=False)
-                z = ddim_step(x_hat.detach(), z, t_val, s_val, self.schedule_s)
+            z = checkpoint(_step_fn, z, t_val, s_val, use_reentrant=False)
 
         # Compute moments of generated samples
         flat = z.flatten(1)
