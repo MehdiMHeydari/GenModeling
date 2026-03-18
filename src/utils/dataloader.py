@@ -3,6 +3,24 @@ import numpy as np
 from torch.utils.data import DataLoader
 
 
+def get_data_loader(data_path, batch_size, dataset_cls, train_samples=9000,
+                    save_dir=None, loader_type="darcy"):
+    """Generic data loader dispatcher.
+
+    Args:
+        loader_type: "darcy" or "ns" (Navier-Stokes). Default "darcy".
+        Other args: passed to the specific loader.
+    Returns:
+        train_loader, data_min, data_max
+    """
+    if loader_type == "ns":
+        return get_ns_loader(data_path, batch_size, dataset_cls,
+                             train_samples=train_samples, save_dir=save_dir)
+    else:
+        return get_darcy_loader(data_path, batch_size, dataset_cls,
+                                train_samples=train_samples, save_dir=save_dir)
+
+
 def get_darcy_loader(data_path, batch_size, dataset_cls, train_samples=9000,
                      save_dir=None):
     """Load Darcy Flow HDF5 data with min-max normalization to [-1, 1].
@@ -45,6 +63,90 @@ def get_darcy_loader(data_path, batch_size, dataset_cls, train_samples=9000,
         dataset, batch_size=batch_size,
         shuffle=True, num_workers=2, pin_memory=True,
     )
+    return loader, data_min, data_max
+
+
+def get_ns_loader(data_path, batch_size, dataset_cls, train_samples=90000,
+                  save_dir=None):
+    """Load PDEBench 2D incompressible Navier-Stokes HDF5 data.
+
+    Expects HDF5 with shape [N_sim, T, H, W, channels] (PDEBench convention).
+    Reshapes to [N_sim*T, channels, H, W] and normalizes to [-1, 1].
+
+    Args:
+        data_path: Path to NS HDF5 file
+        batch_size: Batch size for DataLoader
+        dataset_cls: Dataset class (e.g. VF_FM)
+        train_samples: Number of samples for training split
+        save_dir: If provided, saves data_min.npy and data_max.npy here
+    Returns:
+        train_loader, data_min, data_max
+    """
+    import h5py
+
+    with h5py.File(data_path, 'r') as f:
+        print(f"NS HDF5 keys: {list(f.keys())}")
+
+        # Try common PDEBench key names
+        if 'velocity' in f:
+            data = np.array(f['velocity']).astype(np.float32)
+        elif 'Vx' in f and 'Vy' in f:
+            vx = np.array(f['Vx']).astype(np.float32)
+            vy = np.array(f['Vy']).astype(np.float32)
+            data = np.stack([vx, vy], axis=-1)
+        elif 'tensor' in f:
+            data = np.array(f['tensor']).astype(np.float32)
+        else:
+            raise ValueError(
+                f"Cannot find velocity data. Available keys: {list(f.keys())}. "
+                "Expected 'velocity', 'Vx'/'Vy', or 'tensor'."
+            )
+
+    print(f"Raw NS data shape: {data.shape}")
+
+    # PDEBench convention: [N_sim, T, H, W, V]
+    # We want: [N_sim*T, V, H, W] (channels first)
+    if data.ndim == 5:
+        N_sim, T, H, W, V = data.shape
+        # Flatten simulations × timesteps → independent samples
+        data = data.reshape(N_sim * T, H, W, V)
+        # Channels last → channels first
+        data = data.transpose(0, 3, 1, 2)  # [N*T, V, H, W]
+    elif data.ndim == 4:
+        # Already [N, H, W, V] or [N, V, H, W]
+        if data.shape[-1] <= 3:  # likely channels-last
+            data = data.transpose(0, 3, 1, 2)
+    elif data.ndim == 3:
+        # [N, H, W] single channel
+        data = data[:, np.newaxis, :, :]
+
+    print(f"Reshaped NS data: {data.shape} (N, C, H, W)")
+
+    # Min-max normalize to [-1, 1] (global across all channels)
+    data_min = float(data.min())
+    data_max = float(data.max())
+    data_norm = 2.0 * (data - data_min) / (data_max - data_min) - 1.0
+
+    # Save normalization stats
+    if save_dir is not None:
+        os.makedirs(save_dir, exist_ok=True)
+        np.save(os.path.join(save_dir, "data_min.npy"), np.array(data_min))
+        np.save(os.path.join(save_dir, "data_max.npy"), np.array(data_max))
+
+    # Shuffle before splitting (timesteps from same sim are sequential)
+    rng = np.random.default_rng(42)
+    perm = rng.permutation(len(data_norm))
+    data_norm = data_norm[perm]
+
+    train_data = data_norm[:train_samples]
+    dataset = dataset_cls(train_data, all_vel=True)
+
+    loader = DataLoader(
+        dataset, batch_size=batch_size,
+        shuffle=True, num_workers=2, pin_memory=True,
+    )
+    print(f"NS loader: {len(train_data)} train samples, "
+          f"range [{data_min:.4f}, {data_max:.4f}]")
     return loader, data_min, data_max
 
 

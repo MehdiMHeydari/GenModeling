@@ -21,7 +21,7 @@ from tqdm.auto import tqdm
 import wandb
 
 from src.models.networks.unet.unet import UNetModelWrapper as UNetModel
-from src.utils.dataloader import get_darcy_loader
+from src.utils.dataloader import get_data_loader
 from src.utils.dataset import DATASETS
 from src.training.objectives import ProgressiveDistillationLoss
 from src.models.vp_diffusion import VPDiffusionModel
@@ -81,12 +81,13 @@ def main(config_path):
     dev = th.device(config.device)
 
     # --- Data ---
-    train_loader, data_min, data_max = get_darcy_loader(
+    train_loader, data_min, data_max = get_data_loader(
         data_path=config.dataloader.datapath,
         batch_size=config.dataloader.batch_size,
         dataset_cls=DATASETS[config.dataloader.dataset],
         train_samples=config.dataloader.get("train_samples", 9000),
         save_dir=savepath,
+        loader_type=config.dataloader.get("loader_type", "darcy"),
     )
     print(f"Data loaded: {len(train_loader)} batches/epoch, "
           f"range [{data_min:.4f}, {data_max:.4f}]")
