@@ -1,4 +1,4 @@
-device: cuda:4
+device: cuda:5
 exp_num: 21
 path: "darcy_student"
 th_seed: 1
