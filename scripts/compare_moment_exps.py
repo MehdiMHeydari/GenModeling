@@ -128,7 +128,7 @@ def main():
     parser.add_argument("--gpu", type=int, default=0)
     parser.add_argument("--n_samples", type=int, default=1000,
                         help="Number of samples for histogram (use 1000+ for smooth curves)")
-    parser.add_argument("--n_show", type=int, default=6,
+    parser.add_argument("--n_show", type=int, default=12,
                         help="Number of samples to show in the visual grid")
     parser.add_argument("--output_dir", type=str, default="eval_moment_v4")
     args = parser.parse_args()
@@ -193,7 +193,7 @@ def main():
     n_cols = args.n_show
 
     fig, axes = plt.subplots(n_rows, n_cols,
-                             figsize=(2.5 * n_cols + 1.5, 2.5 * n_rows))
+                             figsize=(1.8 * n_cols + 2, 2.5 * n_rows))
     plt.subplots_adjust(left=0.12, wspace=0.05, hspace=0.15)
 
     row = 0
