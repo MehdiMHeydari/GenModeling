@@ -130,7 +130,7 @@ def main():
                         help="Number of samples for histogram (use 1000+ for smooth curves)")
     parser.add_argument("--n_show", type=int, default=6,
                         help="Number of samples to show in the visual grid")
-    parser.add_argument("--output_dir", type=str, default="eval_moment_v3")
+    parser.add_argument("--output_dir", type=str, default="eval_moment_v4")
     args = parser.parse_args()
 
     device = th.device(f"cuda:{args.gpu}" if th.cuda.is_available() else "cpu")
@@ -156,12 +156,16 @@ def main():
     exps = {
         "exp_3": {"dir": "darcy_student/exp_3",
                   "label": "CD baseline\n(no moment)"},
-        "exp_16": {"dir": "darcy_student/exp_16",
-                   "label": "Moment exp16\n(var=150)"},
-        "exp_17": {"dir": "darcy_student/exp_17",
-                   "label": "Moment exp17\n(var=200)"},
         "exp_18": {"dir": "darcy_student/exp_18",
-                   "label": "Moment exp18\n(mu=8, var=150)"},
+                   "label": "exp18\n(mu=8, var=150)"},
+        "exp_19": {"dir": "darcy_student/exp_19",
+                   "label": "exp19\n(mu=2, var=150)"},
+        "exp_20": {"dir": "darcy_student/exp_20",
+                   "label": "exp20\n(mu=4, var=150)"},
+        "exp_21": {"dir": "darcy_student/exp_21",
+                   "label": "exp21\n(mu=4, var=200)"},
+        "exp_22": {"dir": "darcy_student/exp_22",
+                   "label": "exp22\n(mu=16, var=150)"},
     }
 
     all_samples = {}
@@ -235,42 +239,32 @@ def main():
     # ============================================================
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 7))
 
-    colors = {
-        "Ground Truth": "gray",
-        "Teacher (50 DDIM)": "tab:blue",
-        "CD baseline (no moment)": "tab:red",
-        "Moment exp16 (var=150)": "tab:orange",
-        "Moment exp17 (var=200)": "tab:green",
-        "Moment exp18 (mu=8, var=150)": "tab:purple",
-    }
+    color_list = ["gray", "tab:blue", "tab:red", "tab:purple",
+                   "tab:orange", "tab:green", "tab:cyan", "tab:pink"]
 
     hist_data = {"Ground Truth": real_denorm.flatten(),
                  "Teacher (50 DDIM)": teacher_denorm.flatten()}
-    label_map = {
-        "exp_3": "CD baseline (no moment)",
-        "exp_16": "Moment exp16 (var=150)",
-        "exp_17": "Moment exp17 (var=200)",
-        "exp_18": "Moment exp18 (mu=8, var=150)",
-    }
     for name in active_exps:
-        hist_data[label_map[name]] = all_samples[name].flatten()
-
+        clean = exps[name]["label"].replace("\n", " ")
+        hist_data[clean] = all_samples[name].flatten()
     bins = np.linspace(0, real_denorm.max() * 1.05, 150)
 
     # Left: overlaid filled histograms
-    for label, data in hist_data.items():
+    for i, (label, data) in enumerate(hist_data.items()):
+        c = color_list[i % len(color_list)]
         ax1.hist(data, bins=bins, alpha=0.3, density=True,
-                 label=label, color=colors[label])
+                 label=label, color=c)
     ax1.set_xlabel("u(x, y)", fontsize=12)
     ax1.set_ylabel("Density", fontsize=12)
     ax1.set_title("Pixel Value Distribution (Overlaid)", fontsize=13)
     ax1.legend(fontsize=9)
 
     # Right: line histograms
-    for label, data in hist_data.items():
+    for i, (label, data) in enumerate(hist_data.items()):
+        c = color_list[i % len(color_list)]
         counts, edges = np.histogram(data, bins=bins, density=True)
         centers = (edges[:-1] + edges[1:]) / 2
-        ax2.plot(centers, counts, label=label, color=colors[label], linewidth=1.5)
+        ax2.plot(centers, counts, label=label, color=c, linewidth=1.5)
     ax2.set_xlabel("u(x, y)", fontsize=12)
     ax2.set_ylabel("Density", fontsize=12)
     ax2.set_title("Pixel Value Distribution (Line)", fontsize=13)
