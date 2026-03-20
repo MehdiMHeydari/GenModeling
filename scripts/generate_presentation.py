@@ -34,7 +34,7 @@ DDIM_STEPS = 50
 DATA_PATH = "data/2D_DarcyFlow_beta1.0_Train.hdf5"
 STATS_DIR = "darcy_teacher/exp_1/saved_state"
 TEACHER_CKPT = "darcy_teacher/exp_1/saved_state/checkpoint_200.pt"
-CMAP = "viridis"
+CMAP = "RdBu_r"
 
 UNET_CFG = dict(
     dim=list(DATA_SHAPE),
@@ -258,34 +258,86 @@ def plot_sample_grid(rows, n_show, title, save_path):
 
 def plot_histogram(data_dict, title, save_path, bins=None):
     """
-    data_dict: OrderedDict of {label: flat_array}
+    data_dict: dict of {label: flat_array}.
+    First entry is rendered as a filled shaded area (ground truth),
+    remaining entries as line plots.
     """
-    color_list = ["gray", "tab:blue", "tab:red", "tab:orange",
+    color_list = ["tab:blue", "tab:red", "tab:orange",
                   "tab:green", "tab:purple", "tab:cyan", "tab:pink"]
 
     if bins is None:
         all_vals = np.concatenate(list(data_dict.values()))
         bins = np.linspace(0, np.percentile(all_vals, 99.5) * 1.05, 150)
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(18, 6))
+    fig, ax = plt.subplots(figsize=(10, 6))
 
     for i, (label, data) in enumerate(data_dict.items()):
-        c = color_list[i % len(color_list)]
-        ax1.hist(data, bins=bins, alpha=0.3, density=True,
-                 label=label, color=c, histtype='stepfilled')
         counts, edges = np.histogram(data, bins=bins, density=True)
         centers = (edges[:-1] + edges[1:]) / 2
-        ax2.plot(centers, counts, label=label, color=c, linewidth=1.5)
+        if i == 0:
+            # Ground truth as shaded area
+            ax.fill_between(centers, counts, alpha=0.3, color="gray", label=label)
+            ax.plot(centers, counts, color="gray", linewidth=1.0, alpha=0.5)
+        else:
+            c = color_list[(i - 1) % len(color_list)]
+            ax.plot(centers, counts, label=label, color=c, linewidth=1.5)
 
-    for ax in [ax1, ax2]:
-        ax.set_xlabel("u(x, y)", fontsize=12)
-        ax.set_ylabel("Density", fontsize=12)
-        ax.legend(fontsize=9)
-        ax.grid(True, alpha=0.3)
-    ax1.set_title("Pixel Value Distribution (Overlaid)", fontsize=13)
-    ax2.set_title("Pixel Value Distribution (Line)", fontsize=13)
+    ax.set_xlabel("u(x, y)", fontsize=12)
+    ax.set_ylabel("Density", fontsize=12)
+    ax.legend(fontsize=9)
+    ax.grid(True, alpha=0.3)
 
     fig.suptitle(title, fontsize=14, fontweight="bold")
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"  Saved {save_path}")
+
+
+def plot_rf_sidebyside(rf_samples_dict, reflow_samples_dict, n_show, save_path):
+    """
+    Side-by-side grid: RF (Round 1) on left, Reflow (Round 2) on right.
+    Each dict maps step_count -> samples_np [N, 1, H, W].
+    """
+    step_counts = sorted(rf_samples_dict.keys())
+    n_rows = len(step_counts)
+
+    fig, axes = plt.subplots(n_rows, n_show * 2 + 1,
+                             figsize=(1.4 * (n_show * 2 + 1), 1.6 * n_rows))
+    plt.subplots_adjust(wspace=0.03, hspace=0.08)
+
+    for r, steps in enumerate(step_counts):
+        # Left panel: RF
+        rf_data = rf_samples_dict.get(steps)
+        for j in range(n_show):
+            ax = axes[r, j]
+            if rf_data is not None:
+                ax.imshow(rf_data[j, 0], cmap=CMAP)
+            ax.axis("off")
+
+        # Separator column
+        axes[r, n_show].axis("off")
+
+        # Right panel: Reflow
+        reflow_data = reflow_samples_dict.get(steps)
+        for j in range(n_show):
+            ax = axes[r, n_show + 1 + j]
+            if reflow_data is not None:
+                ax.imshow(reflow_data[j, 0], cmap=CMAP)
+            ax.axis("off")
+
+        # Row label
+        label = f"{steps} step{'s' if steps > 1 else ''}"
+        axes[r, 0].text(-0.15, 0.5, label,
+                        transform=axes[r, 0].transAxes, fontsize=9,
+                        fontweight="bold", va="center", ha="right")
+
+    # Column titles
+    fig.text(0.25, 1.01, "Rectified Flow (Round 1)",
+             ha="center", fontsize=13, fontweight="bold")
+    fig.text(0.75, 1.01, "Reflow (Round 2)",
+             ha="center", fontsize=13, fontweight="bold")
+
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches="tight")
     plt.close()
@@ -301,7 +353,7 @@ def main():
     parser.add_argument("--gpu", type=int, default=4)
     parser.add_argument("--n_show", type=int, default=12,
                         help="Number of sample images per row in grids")
-    parser.add_argument("--n_hist", type=int, default=1000,
+    parser.add_argument("--n_hist", type=int, default=500,
                         help="Number of samples for histograms")
     parser.add_argument("--output_dir", type=str, default="presentation")
     parser.add_argument("--skip_to", type=int, default=2,
@@ -411,41 +463,41 @@ def main():
             print("  WARNING: No CD exp_3 checkpoints found, skipping")
 
     # ===========================================================
-    # SLIDE 4: Rectified Flow
+    # SLIDE 4: Rectified Flow (side-by-side, steps 1-10)
     # ===========================================================
     if should_run(4):
         print("\n[Slide 4] Rectified Flow...")
         rf_ckpt = "darcy_rectified_flow/exp_1/saved_state/checkpoint_799.pt"
         reflow_ckpt = "darcy_rectified_flow_reflow/exp_1/saved_state/checkpoint_399.pt"
 
-        rf_rows = [gt_row]
+        rf_dict = {}   # step_count -> denorm samples
+        reflow_dict = {}
         rf_hist = {"Ground Truth": real_denorm.flatten()}
         has_rf = False
 
         if os.path.exists(rf_ckpt):
-            for n_steps in [1, 5, 10]:
+            for n_steps in range(1, 11):
                 print(f"  RF {n_steps}-step...")
                 rf_samples = sample_rf(rf_ckpt, initial_noise, device, n_steps=n_steps)
                 rf_denorm = denormalize(rf_samples, data_min, data_max)
-                rf_rows.append((f"RF\n({n_steps} step{'s' if n_steps > 1 else ''})", rf_denorm[:args.n_show]))
-                if n_steps == 5:
-                    rf_hist[f"RF ({n_steps} steps)"] = rf_denorm[:args.n_hist].flatten()
+                rf_dict[n_steps] = rf_denorm[:args.n_show]
+                if n_steps in [1, 5, 10]:
+                    rf_hist[f"RF ({n_steps} step{'s' if n_steps > 1 else ''})"] = rf_denorm[:args.n_hist].flatten()
             has_rf = True
 
         if os.path.exists(reflow_ckpt):
-            for n_steps in [1, 5, 10]:
+            for n_steps in range(1, 11):
                 print(f"  Reflow {n_steps}-step...")
                 reflow_samples = sample_rf(reflow_ckpt, initial_noise, device, n_steps=n_steps)
                 reflow_denorm = denormalize(reflow_samples, data_min, data_max)
-                rf_rows.append((f"Reflow\n({n_steps} step{'s' if n_steps > 1 else ''})", reflow_denorm[:args.n_show]))
-                if n_steps == 5:
-                    rf_hist[f"Reflow ({n_steps} steps)"] = reflow_denorm[:args.n_hist].flatten()
+                reflow_dict[n_steps] = reflow_denorm[:args.n_show]
+                if n_steps in [1, 5, 10]:
+                    rf_hist[f"Reflow ({n_steps} step{'s' if n_steps > 1 else ''})"] = reflow_denorm[:args.n_hist].flatten()
             has_rf = True
 
         if has_rf:
-            plot_sample_grid(
-                rf_rows, args.n_show,
-                "Rectified Flow vs Reflow",
+            plot_rf_sidebyside(
+                rf_dict, reflow_dict, args.n_show,
                 os.path.join(args.output_dir, "slide4_rectified_flow.png"),
             )
             plot_histogram(
