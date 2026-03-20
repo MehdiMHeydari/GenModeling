@@ -298,7 +298,7 @@ def plot_histogram(data_dict, title, save_path, bins=None):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--gpu", type=int, default=7)
+    parser.add_argument("--gpu", type=int, default=4)
     parser.add_argument("--n_show", type=int, default=12,
                         help="Number of sample images per row in grids")
     parser.add_argument("--n_hist", type=int, default=1000,
