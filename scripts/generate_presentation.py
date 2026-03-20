@@ -30,7 +30,7 @@ from src.models.diffusion_utils import ddim_step
 # ============================================================
 DATA_SHAPE = (1, 128, 128)
 SCHEDULE_S = 0.008
-DDIM_STEPS = 50
+DDIM_STEPS = 75
 DATA_PATH = "data/2D_DarcyFlow_beta1.0_Train.hdf5"
 STATS_DIR = "darcy_teacher/exp_1/saved_state"
 TEACHER_CKPT = "darcy_teacher/exp_1/saved_state/checkpoint_200.pt"
@@ -399,10 +399,10 @@ def main():
     teacher_slides = {2, 3, 6}
     needs_teacher = any(should_run(s) for s in teacher_slides)
     if needs_teacher:
-        print("\n[Teacher] Sampling 50 DDIM steps...")
+        print("\n[Teacher] Sampling 75 DDIM steps...")
         teacher_samples = sample_teacher(initial_noise, device)
         teacher_denorm = denormalize(teacher_samples, data_min, data_max)
-        teacher_row = ("Teacher\n(50 DDIM)", teacher_denorm[:args.n_show])
+        teacher_row = ("Teacher\n(75 DDIM)", teacher_denorm[:args.n_show])
     else:
         teacher_denorm = None
         teacher_row = None
@@ -416,7 +416,7 @@ def main():
         if pd_ckpts:
             pd_rows = [gt_row, teacher_row]
             pd_hist = {"Ground Truth": real_denorm.flatten(),
-                       "Teacher (50 DDIM)": teacher_denorm[:args.n_hist].flatten()}
+                       "Teacher (75 DDIM)": teacher_denorm[:args.n_hist].flatten()}
             for ckpt_path, round_num, steps in pd_ckpts:
                 print(f"  PD round {round_num} ({steps} steps)...")
                 samples = sample_pd_checkpoint(ckpt_path, steps, initial_noise, device)
@@ -454,7 +454,7 @@ def main():
             )
             plot_histogram(
                 {"Ground Truth": real_denorm.flatten(),
-                 "Teacher (50 DDIM)": teacher_denorm[:args.n_hist].flatten(),
+                 "Teacher (75 DDIM)": teacher_denorm[:args.n_hist].flatten(),
                  "CD baseline (16 steps)": cd_denorm[:args.n_hist].flatten()},
                 "Consistency Distillation: Distribution",
                 os.path.join(args.output_dir, "slide3_cd_histogram.png"),
@@ -563,7 +563,7 @@ def main():
 
         moment_rows = [gt_row, teacher_row]
         moment_hist = {"Ground Truth": real_denorm.flatten(),
-                       "Teacher (50 DDIM)": teacher_denorm[:args.n_hist].flatten()}
+                       "Teacher (75 DDIM)": teacher_denorm[:args.n_hist].flatten()}
         has_moment = False
 
         for name, (exp_dir, label) in moment_exps.items():
