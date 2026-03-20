@@ -491,10 +491,11 @@ def main():
         has_rf = False
 
         rf_max = args.rf_max_steps
-        rf_hist_steps = [1, 5, 10] if rf_max >= 10 else list(range(1, rf_max + 1))
+        rf_step_list = sorted(set(range(1, rf_max + 1)) | {10})  # always include 10
+        rf_hist_steps = [1, 5, 10] if rf_max >= 10 else sorted(set(range(1, rf_max + 1)) | {10})
 
         if os.path.exists(rf_ckpt):
-            for n_steps in range(1, rf_max + 1):
+            for n_steps in rf_step_list:
                 print(f"  RF {n_steps}-step...")
                 rf_samples = sample_rf(rf_ckpt, initial_noise, device, n_steps=n_steps)
                 rf_denorm = denormalize(rf_samples, data_min, data_max)
@@ -504,7 +505,7 @@ def main():
             has_rf = True
 
         if os.path.exists(reflow_ckpt):
-            for n_steps in range(1, rf_max + 1):
+            for n_steps in rf_step_list:
                 print(f"  Reflow {n_steps}-step...")
                 reflow_samples = sample_rf(reflow_ckpt, initial_noise, device, n_steps=n_steps)
                 reflow_denorm = denormalize(reflow_samples, data_min, data_max)
