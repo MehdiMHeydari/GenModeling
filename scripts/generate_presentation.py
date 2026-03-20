@@ -196,7 +196,7 @@ def sample_mfm(exp_dir, initial_noise, device, n_steps=2, batch_size=64):
 
 def sample_rf(ckpt_path, initial_noise, device, n_steps=5, batch_size=64):
     network = UNetModel(**UNET_CFG)
-    model = RectifiedFlowMatching(network=network)
+    model = RectifiedFlowMatching(network=network, add_heavy_noise=False)
     state = th.load(ckpt_path, map_location="cpu", weights_only=True)
     model.network.load_state_dict(state["model_state_dict"])
     model.to(device)
