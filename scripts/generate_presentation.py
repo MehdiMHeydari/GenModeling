@@ -296,6 +296,8 @@ def main():
     parser.add_argument("--n_hist", type=int, default=1000,
                         help="Number of samples for histograms")
     parser.add_argument("--output_dir", type=str, default="presentation")
+    parser.add_argument("--skip_to", type=int, default=2,
+                        help="Start from this slide number (2-6)")
     args = parser.parse_args()
 
     device = th.device(f"cuda:{args.gpu}" if th.cuda.is_available() else "cpu")
@@ -329,179 +331,184 @@ def main():
     # ===========================================================
     # SLIDE 2: Progressive Distillation
     # ===========================================================
-    print("\n[Slide 2] Progressive Distillation...")
-    pd_result = sample_pd(initial_noise, device)
-    if pd_result[0] is not None:
-        pd_samples, pd_round, pd_steps = pd_result
-        pd_denorm = denormalize(pd_samples, data_min, data_max)
-        plot_sample_grid(
-            [gt_row, teacher_row,
-             (f"Prog. Distillation\n(round {pd_round}, {pd_steps} steps)", pd_denorm[:args.n_show])],
-            args.n_show,
-            "Progressive Distillation",
-            os.path.join(args.output_dir, "slide2_progressive_distillation.png"),
-        )
-        plot_histogram(
-            {"Ground Truth": real_denorm.flatten(),
-             "Teacher (50 DDIM)": teacher_denorm[:args.n_hist].flatten(),
-             f"PD (round {pd_round}, {pd_steps} steps)": pd_denorm[:args.n_hist].flatten()},
-            "Progressive Distillation: Distribution",
-            os.path.join(args.output_dir, "slide2_pd_histogram.png"),
-        )
-    else:
-        print("  WARNING: No PD checkpoints found, skipping")
+    if args.skip_to <= 2:
+        print("\n[Slide 2] Progressive Distillation...")
+        pd_result = sample_pd(initial_noise, device)
+        if pd_result[0] is not None:
+            pd_samples, pd_round, pd_steps = pd_result
+            pd_denorm = denormalize(pd_samples, data_min, data_max)
+            plot_sample_grid(
+                [gt_row, teacher_row,
+                 (f"Prog. Distillation\n(round {pd_round}, {pd_steps} steps)", pd_denorm[:args.n_show])],
+                args.n_show,
+                "Progressive Distillation",
+                os.path.join(args.output_dir, "slide2_progressive_distillation.png"),
+            )
+            plot_histogram(
+                {"Ground Truth": real_denorm.flatten(),
+                 "Teacher (50 DDIM)": teacher_denorm[:args.n_hist].flatten(),
+                 f"PD (round {pd_round}, {pd_steps} steps)": pd_denorm[:args.n_hist].flatten()},
+                "Progressive Distillation: Distribution",
+                os.path.join(args.output_dir, "slide2_pd_histogram.png"),
+            )
+        else:
+            print("  WARNING: No PD checkpoints found, skipping")
 
     # ===========================================================
     # SLIDE 3: Consistency Distillation (baseline, no moment)
     # ===========================================================
-    print("\n[Slide 3] Consistency Distillation (exp 3 baseline)...")
-    cd_result = sample_cd("darcy_student/exp_3", initial_noise, device)
-    if cd_result[0] is not None:
-        cd_samples, cd_epoch = cd_result
-        cd_denorm = denormalize(cd_samples, data_min, data_max)
-        plot_sample_grid(
-            [gt_row, teacher_row,
-             (f"Consistency Distillation\n(epoch {cd_epoch}, 16 steps)", cd_denorm[:args.n_show])],
-            args.n_show,
-            "Consistency Distillation",
-            os.path.join(args.output_dir, "slide3_consistency_distillation.png"),
-        )
-        plot_histogram(
-            {"Ground Truth": real_denorm.flatten(),
-             "Teacher (50 DDIM)": teacher_denorm[:args.n_hist].flatten(),
-             f"CD baseline (epoch {cd_epoch})": cd_denorm[:args.n_hist].flatten()},
-            "Consistency Distillation: Distribution",
-            os.path.join(args.output_dir, "slide3_cd_histogram.png"),
-        )
-    else:
-        print("  WARNING: No CD exp_3 checkpoints found, skipping")
+    if args.skip_to <= 3:
+        print("\n[Slide 3] Consistency Distillation (exp 3 baseline)...")
+        cd_result = sample_cd("darcy_student/exp_3", initial_noise, device)
+        if cd_result[0] is not None:
+            cd_samples, cd_epoch = cd_result
+            cd_denorm = denormalize(cd_samples, data_min, data_max)
+            plot_sample_grid(
+                [gt_row, teacher_row,
+                 (f"Consistency Distillation\n(epoch {cd_epoch}, 16 steps)", cd_denorm[:args.n_show])],
+                args.n_show,
+                "Consistency Distillation",
+                os.path.join(args.output_dir, "slide3_consistency_distillation.png"),
+            )
+            plot_histogram(
+                {"Ground Truth": real_denorm.flatten(),
+                 "Teacher (50 DDIM)": teacher_denorm[:args.n_hist].flatten(),
+                 f"CD baseline (epoch {cd_epoch})": cd_denorm[:args.n_hist].flatten()},
+                "Consistency Distillation: Distribution",
+                os.path.join(args.output_dir, "slide3_cd_histogram.png"),
+            )
+        else:
+            print("  WARNING: No CD exp_3 checkpoints found, skipping")
 
     # ===========================================================
     # SLIDE 4: Rectified Flow
     # ===========================================================
-    print("\n[Slide 4] Rectified Flow...")
-    rf_ckpt = "darcy_rectified_flow/exp_1/saved_state/checkpoint_799.pt"
-    reflow_ckpt = "darcy_rectified_flow_reflow/exp_1/saved_state/checkpoint_399.pt"
+    if args.skip_to <= 4:
+        print("\n[Slide 4] Rectified Flow...")
+        rf_ckpt = "darcy_rectified_flow/exp_1/saved_state/checkpoint_799.pt"
+        reflow_ckpt = "darcy_rectified_flow_reflow/exp_1/saved_state/checkpoint_399.pt"
 
-    rf_rows = [gt_row, teacher_row]
-    rf_hist = {"Ground Truth": real_denorm.flatten(),
-               "Teacher (50 DDIM)": teacher_denorm[:args.n_hist].flatten()}
-    has_rf = False
+        rf_rows = [gt_row, teacher_row]
+        rf_hist = {"Ground Truth": real_denorm.flatten(),
+                   "Teacher (50 DDIM)": teacher_denorm[:args.n_hist].flatten()}
+        has_rf = False
 
-    if os.path.exists(rf_ckpt):
-        for n_steps in [1, 5, 10]:
-            print(f"  RF {n_steps}-step...")
-            rf_samples = sample_rf(rf_ckpt, initial_noise, device, n_steps=n_steps)
-            rf_denorm = denormalize(rf_samples, data_min, data_max)
-            rf_rows.append((f"RF\n({n_steps} step{'s' if n_steps > 1 else ''})", rf_denorm[:args.n_show]))
-            if n_steps == 5:
-                rf_hist[f"RF ({n_steps} steps)"] = rf_denorm[:args.n_hist].flatten()
-        has_rf = True
+        if os.path.exists(rf_ckpt):
+            for n_steps in [1, 5, 10]:
+                print(f"  RF {n_steps}-step...")
+                rf_samples = sample_rf(rf_ckpt, initial_noise, device, n_steps=n_steps)
+                rf_denorm = denormalize(rf_samples, data_min, data_max)
+                rf_rows.append((f"RF\n({n_steps} step{'s' if n_steps > 1 else ''})", rf_denorm[:args.n_show]))
+                if n_steps == 5:
+                    rf_hist[f"RF ({n_steps} steps)"] = rf_denorm[:args.n_hist].flatten()
+            has_rf = True
 
-    if os.path.exists(reflow_ckpt):
-        for n_steps in [1, 5, 10]:
-            print(f"  Reflow {n_steps}-step...")
-            reflow_samples = sample_rf(reflow_ckpt, initial_noise, device, n_steps=n_steps)
-            reflow_denorm = denormalize(reflow_samples, data_min, data_max)
-            rf_rows.append((f"Reflow\n({n_steps} step{'s' if n_steps > 1 else ''})", reflow_denorm[:args.n_show]))
-            if n_steps == 5:
-                rf_hist[f"Reflow ({n_steps} steps)"] = reflow_denorm[:args.n_hist].flatten()
-        has_rf = True
+        if os.path.exists(reflow_ckpt):
+            for n_steps in [1, 5, 10]:
+                print(f"  Reflow {n_steps}-step...")
+                reflow_samples = sample_rf(reflow_ckpt, initial_noise, device, n_steps=n_steps)
+                reflow_denorm = denormalize(reflow_samples, data_min, data_max)
+                rf_rows.append((f"Reflow\n({n_steps} step{'s' if n_steps > 1 else ''})", reflow_denorm[:args.n_show]))
+                if n_steps == 5:
+                    rf_hist[f"Reflow ({n_steps} steps)"] = reflow_denorm[:args.n_hist].flatten()
+            has_rf = True
 
-    if has_rf:
-        plot_sample_grid(
-            rf_rows, args.n_show,
-            "Rectified Flow vs Reflow",
-            os.path.join(args.output_dir, "slide4_rectified_flow.png"),
-        )
-        plot_histogram(
-            rf_hist,
-            "Rectified Flow: Distribution",
-            os.path.join(args.output_dir, "slide4_rf_histogram.png"),
-        )
-    else:
-        print("  WARNING: No RF checkpoints found, skipping")
+        if has_rf:
+            plot_sample_grid(
+                rf_rows, args.n_show,
+                "Rectified Flow vs Reflow",
+                os.path.join(args.output_dir, "slide4_rectified_flow.png"),
+            )
+            plot_histogram(
+                rf_hist,
+                "Rectified Flow: Distribution",
+                os.path.join(args.output_dir, "slide4_rf_histogram.png"),
+            )
+        else:
+            print("  WARNING: No RF checkpoints found, skipping")
 
     # ===========================================================
     # SLIDE 5: Mean Flow Matching
     # ===========================================================
-    print("\n[Slide 5] Mean Flow Matching...")
-    mfm_rows = [gt_row, teacher_row]
-    mfm_hist = {"Ground Truth": real_denorm.flatten(),
-                "Teacher (50 DDIM)": teacher_denorm[:args.n_hist].flatten()}
-    has_mfm = False
+    if args.skip_to <= 5:
+        print("\n[Slide 5] Mean Flow Matching...")
+        mfm_rows = [gt_row, teacher_row]
+        mfm_hist = {"Ground Truth": real_denorm.flatten(),
+                    "Teacher (50 DDIM)": teacher_denorm[:args.n_hist].flatten()}
+        has_mfm = False
 
-    for exp_name, exp_dir, label in [
-        ("exp_5", "darcy_mean_flow/exp_5", "MFM exp5\n(gamma=0.5, norm=1)"),
-        ("exp_7", "darcy_mean_flow/exp_7", "MFM exp7\n(gamma=0.5, accum=4)"),
-    ]:
-        for n_steps in [2, 4]:
-            result = sample_mfm(exp_dir, initial_noise, device, n_steps=n_steps)
-            if result[0] is not None:
-                samples, epoch = result
-                mfm_denorm = denormalize(samples, data_min, data_max)
-                row_label = f"{label}\n({n_steps}-step, ep {epoch})"
-                mfm_rows.append((row_label, mfm_denorm[:args.n_show]))
-                if n_steps == 2:
-                    clean = label.replace("\n", " ")
-                    mfm_hist[f"{clean} (ep {epoch})"] = mfm_denorm[:args.n_hist].flatten()
-                has_mfm = True
+        for exp_name, exp_dir, label in [
+            ("exp_5", "darcy_mean_flow/exp_5", "MFM exp5\n(gamma=0.5, norm=1)"),
+            ("exp_7", "darcy_mean_flow/exp_7", "MFM exp7\n(gamma=0.5, accum=4)"),
+        ]:
+            for n_steps in [2, 4]:
+                result = sample_mfm(exp_dir, initial_noise, device, n_steps=n_steps)
+                if result[0] is not None:
+                    samples, epoch = result
+                    mfm_denorm = denormalize(samples, data_min, data_max)
+                    row_label = f"{label}\n({n_steps}-step, ep {epoch})"
+                    mfm_rows.append((row_label, mfm_denorm[:args.n_show]))
+                    if n_steps == 2:
+                        clean = label.replace("\n", " ")
+                        mfm_hist[f"{clean} (ep {epoch})"] = mfm_denorm[:args.n_hist].flatten()
+                    has_mfm = True
 
-    if has_mfm:
-        plot_sample_grid(
-            mfm_rows, args.n_show,
-            "Mean Flow Matching",
-            os.path.join(args.output_dir, "slide5_mean_flow_matching.png"),
-        )
-        plot_histogram(
-            mfm_hist,
-            "Mean Flow Matching: Distribution",
-            os.path.join(args.output_dir, "slide5_mfm_histogram.png"),
-        )
-    else:
-        print("  WARNING: No MFM checkpoints found, skipping")
+        if has_mfm:
+            plot_sample_grid(
+                mfm_rows, args.n_show,
+                "Mean Flow Matching",
+                os.path.join(args.output_dir, "slide5_mean_flow_matching.png"),
+            )
+            plot_histogram(
+                mfm_hist,
+                "Mean Flow Matching: Distribution",
+                os.path.join(args.output_dir, "slide5_mfm_histogram.png"),
+            )
+        else:
+            print("  WARNING: No MFM checkpoints found, skipping")
 
     # ===========================================================
     # SLIDE 6: Moment Matching (our contribution)
     # ===========================================================
-    print("\n[Slide 6] Moment Matching...")
-    moment_exps = {
-        "exp_3":  ("darcy_student/exp_3",  "CD baseline\n(no moment)"),
-        "exp_18": ("darcy_student/exp_18", "mu=8, var=150"),
-        "exp_19": ("darcy_student/exp_19", "mu=2, var=150"),
-        "exp_20": ("darcy_student/exp_20", "mu=4, var=150"),
-        "exp_21": ("darcy_student/exp_21", "mu=4, var=200"),
-        "exp_22": ("darcy_student/exp_22", "mu=16, var=150"),
-    }
+    if args.skip_to <= 6:
+        print("\n[Slide 6] Moment Matching...")
+        moment_exps = {
+            "exp_3":  ("darcy_student/exp_3",  "CD baseline\n(no moment)"),
+            "exp_18": ("darcy_student/exp_18", "mu=8, var=150"),
+            "exp_19": ("darcy_student/exp_19", "mu=2, var=150"),
+            "exp_20": ("darcy_student/exp_20", "mu=4, var=150"),
+            "exp_21": ("darcy_student/exp_21", "mu=4, var=200"),
+            "exp_22": ("darcy_student/exp_22", "mu=16, var=150"),
+        }
 
-    moment_rows = [gt_row, teacher_row]
-    moment_hist = {"Ground Truth": real_denorm.flatten(),
-                   "Teacher (50 DDIM)": teacher_denorm[:args.n_hist].flatten()}
-    has_moment = False
+        moment_rows = [gt_row, teacher_row]
+        moment_hist = {"Ground Truth": real_denorm.flatten(),
+                       "Teacher (50 DDIM)": teacher_denorm[:args.n_hist].flatten()}
+        has_moment = False
 
-    for name, (exp_dir, label) in moment_exps.items():
-        result = sample_cd(exp_dir, initial_noise, device)
-        if result[0] is not None:
-            samples, epoch = result
-            exp_denorm = denormalize(samples, data_min, data_max)
-            moment_rows.append((f"{label}\n(ep {epoch})", exp_denorm[:args.n_show]))
-            clean = label.replace("\n", " ")
-            moment_hist[f"{clean} (ep {epoch})"] = exp_denorm[:args.n_hist].flatten()
-            has_moment = True
-        else:
-            print(f"  WARNING: No checkpoint for {name}, skipping")
+        for name, (exp_dir, label) in moment_exps.items():
+            result = sample_cd(exp_dir, initial_noise, device)
+            if result[0] is not None:
+                samples, epoch = result
+                exp_denorm = denormalize(samples, data_min, data_max)
+                moment_rows.append((f"{label}\n(ep {epoch})", exp_denorm[:args.n_show]))
+                clean = label.replace("\n", " ")
+                moment_hist[f"{clean} (ep {epoch})"] = exp_denorm[:args.n_hist].flatten()
+                has_moment = True
+            else:
+                print(f"  WARNING: No checkpoint for {name}, skipping")
 
-    if has_moment:
-        plot_sample_grid(
-            moment_rows, args.n_show,
-            "Moment Matching Regularization",
-            os.path.join(args.output_dir, "slide6_moment_matching.png"),
-        )
-        plot_histogram(
-            moment_hist,
-            "Moment Matching: Distribution Comparison",
-            os.path.join(args.output_dir, "slide6_moment_histogram.png"),
-        )
+        if has_moment:
+            plot_sample_grid(
+                moment_rows, args.n_show,
+                "Moment Matching Regularization",
+                os.path.join(args.output_dir, "slide6_moment_matching.png"),
+            )
+            plot_histogram(
+                moment_hist,
+                "Moment Matching: Distribution Comparison",
+                os.path.join(args.output_dir, "slide6_moment_histogram.png"),
+            )
 
     # ===========================================================
     # Done
