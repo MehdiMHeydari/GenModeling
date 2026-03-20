@@ -122,13 +122,13 @@ def sample_teacher(initial_noise, device, batch_size=64):
     return th.cat(all_samples, dim=0)
 
 
-def sample_cd(exp_dir, initial_noise, device, batch_size=64):
+def sample_cd(exp_dir, initial_noise, device, batch_size=64, student_steps=16):
     ckpt, epoch = find_latest_checkpoint(os.path.join(exp_dir, "saved_state"))
     if ckpt is None:
         return None, None
     network = UNetModel(**UNET_CFG)
     model = MultistepConsistencyModel(
-        network=network, student_steps=16, schedule_s=SCHEDULE_S, infer=True,
+        network=network, student_steps=student_steps, schedule_s=SCHEDULE_S, infer=True,
     )
     state = th.load(ckpt, map_location="cpu", weights_only=True)
     model.network.load_state_dict(state["model_state_dict"])
@@ -437,30 +437,43 @@ def main():
             print("  WARNING: No PD checkpoints found, skipping")
 
     # ===========================================================
-    # SLIDE 3: Consistency Distillation (baseline, no moment)
+    # SLIDE 3: Consistency Distillation (4, 8, 16 step students)
     # ===========================================================
     if should_run(3):
-        print("\n[Slide 3] Consistency Distillation (exp 3 baseline)...")
-        cd_result = sample_cd("darcy_student/exp_3", initial_noise, device)
-        if cd_result[0] is not None:
-            cd_samples, cd_epoch = cd_result
-            cd_denorm = denormalize(cd_samples, data_min, data_max)
+        print("\n[Slide 3] Consistency Distillation...")
+        cd_exps = [
+            ("darcy_student/exp_1", 4,  "CD (4 steps)"),
+            ("darcy_student/exp_2", 8,  "CD (8 steps)"),
+            ("darcy_student/exp_3", 16, "CD (16 steps)"),
+        ]
+        cd_rows = [gt_row, teacher_row]
+        cd_hist = {"Ground Truth": real_denorm.flatten(),
+                   "Teacher (75 DDIM)": teacher_denorm[:args.n_hist].flatten()}
+        has_cd = False
+
+        for exp_dir, steps, label in cd_exps:
+            print(f"  {label}...")
+            result = sample_cd(exp_dir, initial_noise, device, student_steps=steps)
+            if result[0] is not None:
+                cd_samples, _ = result
+                cd_denorm = denormalize(cd_samples, data_min, data_max)
+                cd_rows.append((label, cd_denorm[:args.n_show]))
+                cd_hist[label] = cd_denorm[:args.n_hist].flatten()
+                has_cd = True
+            else:
+                print(f"    WARNING: No checkpoint for {exp_dir}, skipping")
+
+        if has_cd:
             plot_sample_grid(
-                [gt_row, teacher_row,
-                 ("Consistency Distillation\n(16 steps)", cd_denorm[:args.n_show])],
-                args.n_show,
+                cd_rows, args.n_show,
                 "Consistency Distillation",
                 os.path.join(args.output_dir, "slide3_consistency_distillation.png"),
             )
             plot_histogram(
-                {"Ground Truth": real_denorm.flatten(),
-                 "Teacher (75 DDIM)": teacher_denorm[:args.n_hist].flatten(),
-                 "CD baseline (16 steps)": cd_denorm[:args.n_hist].flatten()},
+                cd_hist,
                 "Consistency Distillation: Distribution",
                 os.path.join(args.output_dir, "slide3_cd_histogram.png"),
             )
-        else:
-            print("  WARNING: No CD exp_3 checkpoints found, skipping")
 
     # ===========================================================
     # SLIDE 4: Rectified Flow (side-by-side, steps 1-10)
