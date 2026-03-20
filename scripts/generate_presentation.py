@@ -306,7 +306,15 @@ def main():
     parser.add_argument("--output_dir", type=str, default="presentation")
     parser.add_argument("--skip_to", type=int, default=2,
                         help="Start from this slide number (2-6)")
+    parser.add_argument("--slides", type=str, default=None,
+                        help="Comma-separated slide numbers to run, e.g. '4,5'")
     args = parser.parse_args()
+
+    # Parse --slides into a set; if not given, fall back to skip_to logic
+    if args.slides:
+        args.active_slides = set(int(s) for s in args.slides.split(","))
+    else:
+        args.active_slides = None
 
     device = th.device(f"cuda:{args.gpu}" if th.cuda.is_available() else "cpu")
     os.makedirs(args.output_dir, exist_ok=True)
@@ -326,20 +334,31 @@ def main():
     n_total = max(args.n_show, args.n_hist)
     initial_noise = th.randn(n_total, *DATA_SHAPE)
 
-    # ===========================================================
-    # TEACHER (shared across slides)
-    # ===========================================================
-    print("\n[Teacher] Sampling 50 DDIM steps...")
-    teacher_samples = sample_teacher(initial_noise, device)
-    teacher_denorm = denormalize(teacher_samples, data_min, data_max)
-
     gt_row = ("Ground Truth", real_denorm[:args.n_show])
-    teacher_row = ("Teacher\n(50 DDIM)", teacher_denorm[:args.n_show])
+
+    def should_run(slide_num):
+        if args.active_slides:
+            return slide_num in args.active_slides
+        return args.skip_to <= slide_num
+
+    # ===========================================================
+    # TEACHER (only needed for slides 2, 3, 6)
+    # ===========================================================
+    teacher_slides = {2, 3, 6}
+    needs_teacher = any(should_run(s) for s in teacher_slides)
+    if needs_teacher:
+        print("\n[Teacher] Sampling 50 DDIM steps...")
+        teacher_samples = sample_teacher(initial_noise, device)
+        teacher_denorm = denormalize(teacher_samples, data_min, data_max)
+        teacher_row = ("Teacher\n(50 DDIM)", teacher_denorm[:args.n_show])
+    else:
+        teacher_denorm = None
+        teacher_row = None
 
     # ===========================================================
     # SLIDE 2: Progressive Distillation
     # ===========================================================
-    if args.skip_to <= 2:
+    if should_run(2):
         print("\n[Slide 2] Progressive Distillation...")
         pd_ckpts = find_all_pd_checkpoints("darcy_pd/exp_1/saved_state")
         if pd_ckpts:
@@ -368,7 +387,7 @@ def main():
     # ===========================================================
     # SLIDE 3: Consistency Distillation (baseline, no moment)
     # ===========================================================
-    if args.skip_to <= 3:
+    if should_run(3):
         print("\n[Slide 3] Consistency Distillation (exp 3 baseline)...")
         cd_result = sample_cd("darcy_student/exp_3", initial_noise, device)
         if cd_result[0] is not None:
@@ -394,14 +413,13 @@ def main():
     # ===========================================================
     # SLIDE 4: Rectified Flow
     # ===========================================================
-    if args.skip_to <= 4:
+    if should_run(4):
         print("\n[Slide 4] Rectified Flow...")
         rf_ckpt = "darcy_rectified_flow/exp_1/saved_state/checkpoint_799.pt"
         reflow_ckpt = "darcy_rectified_flow_reflow/exp_1/saved_state/checkpoint_399.pt"
 
-        rf_rows = [gt_row, teacher_row]
-        rf_hist = {"Ground Truth": real_denorm.flatten(),
-                   "Teacher (50 DDIM)": teacher_denorm[:args.n_hist].flatten()}
+        rf_rows = [gt_row]
+        rf_hist = {"Ground Truth": real_denorm.flatten()}
         has_rf = False
 
         if os.path.exists(rf_ckpt):
@@ -441,27 +459,26 @@ def main():
     # ===========================================================
     # SLIDE 5: Mean Flow Matching
     # ===========================================================
-    if args.skip_to <= 5:
+    if should_run(5):
         print("\n[Slide 5] Mean Flow Matching...")
-        mfm_rows = [gt_row, teacher_row]
-        mfm_hist = {"Ground Truth": real_denorm.flatten(),
-                    "Teacher (50 DDIM)": teacher_denorm[:args.n_hist].flatten()}
+        mfm_rows = [gt_row]
+        mfm_hist = {"Ground Truth": real_denorm.flatten()}
         has_mfm = False
 
         for exp_name, exp_dir, label in [
             ("exp_5", "darcy_mean_flow/exp_5", "MFM exp5\n(gamma=0.5, norm=1)"),
             ("exp_7", "darcy_mean_flow/exp_7", "MFM exp7\n(gamma=0.5, accum=4)"),
         ]:
-            for n_steps in [2, 4]:
+            for n_steps in [2, 4, 16]:
                 result = sample_mfm(exp_dir, initial_noise, device, n_steps=n_steps)
                 if result[0] is not None:
                     samples, epoch = result
                     mfm_denorm = denormalize(samples, data_min, data_max)
                     row_label = f"{label}\n({n_steps}-step)"
                     mfm_rows.append((row_label, mfm_denorm[:args.n_show]))
-                    if n_steps == 2:
+                    if n_steps in [2, 16]:
                         clean = label.replace("\n", " ")
-                        mfm_hist[clean] = mfm_denorm[:args.n_hist].flatten()
+                        mfm_hist[f"{clean} ({n_steps}-step)"] = mfm_denorm[:args.n_hist].flatten()
                     has_mfm = True
 
         if has_mfm:
@@ -481,7 +498,7 @@ def main():
     # ===========================================================
     # SLIDE 6: Moment Matching (our contribution)
     # ===========================================================
-    if args.skip_to <= 6:
+    if should_run(6):
         print("\n[Slide 6] Moment Matching...")
         moment_exps = {
             "exp_3":  ("darcy_student/exp_3",  "CD baseline\n(no moment)"),
