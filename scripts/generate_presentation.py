@@ -356,6 +356,8 @@ def main():
     parser.add_argument("--n_hist", type=int, default=200,
                         help="Number of samples for histograms")
     parser.add_argument("--output_dir", type=str, default="presentation")
+    parser.add_argument("--rf_max_steps", type=int, default=10,
+                        help="Max number of Euler steps for RF/Reflow grid (default 10)")
     parser.add_argument("--skip_to", type=int, default=2,
                         help="Start from this slide number (2-6)")
     parser.add_argument("--slides", type=str, default=None,
@@ -488,23 +490,26 @@ def main():
         rf_hist = {"Ground Truth": real_denorm.flatten()}
         has_rf = False
 
+        rf_max = args.rf_max_steps
+        rf_hist_steps = [1, 5, 10] if rf_max >= 10 else list(range(1, rf_max + 1))
+
         if os.path.exists(rf_ckpt):
-            for n_steps in range(1, 11):
+            for n_steps in range(1, rf_max + 1):
                 print(f"  RF {n_steps}-step...")
                 rf_samples = sample_rf(rf_ckpt, initial_noise, device, n_steps=n_steps)
                 rf_denorm = denormalize(rf_samples, data_min, data_max)
                 rf_dict[n_steps] = rf_denorm[:args.n_show]
-                if n_steps in [1, 5, 10]:
+                if n_steps in rf_hist_steps:
                     rf_hist[f"RF ({n_steps} step{'s' if n_steps > 1 else ''})"] = rf_denorm[:args.n_hist].flatten()
             has_rf = True
 
         if os.path.exists(reflow_ckpt):
-            for n_steps in range(1, 11):
+            for n_steps in range(1, rf_max + 1):
                 print(f"  Reflow {n_steps}-step...")
                 reflow_samples = sample_rf(reflow_ckpt, initial_noise, device, n_steps=n_steps)
                 reflow_denorm = denormalize(reflow_samples, data_min, data_max)
                 reflow_dict[n_steps] = reflow_denorm[:args.n_show]
-                if n_steps in [1, 5, 10]:
+                if n_steps in rf_hist_steps:
                     rf_hist[f"Reflow ({n_steps} step{'s' if n_steps > 1 else ''})"] = reflow_denorm[:args.n_hist].flatten()
             has_rf = True
 
