@@ -353,7 +353,7 @@ def main():
     parser.add_argument("--gpu", type=int, default=4)
     parser.add_argument("--n_show", type=int, default=12,
                         help="Number of sample images per row in grids")
-    parser.add_argument("--n_hist", type=int, default=500,
+    parser.add_argument("--n_hist", type=int, default=200,
                         help="Number of samples for histograms")
     parser.add_argument("--output_dir", type=str, default="presentation")
     parser.add_argument("--skip_to", type=int, default=2,
