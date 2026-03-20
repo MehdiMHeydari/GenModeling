@@ -492,7 +492,7 @@ def main():
 
         rf_max = args.rf_max_steps
         rf_step_list = sorted(set(range(1, rf_max + 1)) | {10})  # always include 10
-        rf_hist_steps = [1, 5, 10] if rf_max >= 10 else sorted(set(range(1, rf_max + 1)) | {10})
+        rf_hist_steps = [1, 5, 10]
 
         if os.path.exists(rf_ckpt):
             for n_steps in rf_step_list:
