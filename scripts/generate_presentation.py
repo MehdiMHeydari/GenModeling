@@ -78,6 +78,19 @@ def find_latest_pd_checkpoint(save_dir):
     return best, int(m.group(1)), int(m.group(2))
 
 
+def find_all_pd_checkpoints(save_dir):
+    """Return list of (ckpt_path, round_num, student_steps) sorted by round."""
+    ckpts = glob.glob(os.path.join(save_dir, "pd_round*_steps*.pt"))
+    if not ckpts:
+        return []
+    results = []
+    for c in ckpts:
+        m = re.search(r"pd_round(\d+)_steps(\d+)\.pt", c)
+        if m:
+            results.append((c, int(m.group(1)), int(m.group(2))))
+    return sorted(results, key=lambda x: x[1])
+
+
 def denormalize(samples, data_min, data_max):
     if isinstance(samples, th.Tensor):
         samples = samples.cpu().numpy()
@@ -136,15 +149,10 @@ def sample_cd(exp_dir, initial_noise, device, batch_size=64):
     return th.cat(all_samples, dim=0), epoch
 
 
-def sample_pd(initial_noise, device):
-    save_dir = "darcy_pd/exp_1/saved_state"
-    ckpt, round_num, student_steps = find_latest_pd_checkpoint(save_dir)
-    if ckpt is None:
-        return None, None, None
-
+def sample_pd_checkpoint(ckpt_path, student_steps, initial_noise, device):
     network = UNetModel(**UNET_CFG)
     model = VPDiffusionModel(network=network, schedule_s=SCHEDULE_S, infer=True)
-    state = th.load(ckpt, map_location="cpu", weights_only=True)
+    state = th.load(ckpt_path, map_location="cpu", weights_only=True)
     model.network.load_state_dict(state["model_state_dict"])
     model.to(device).eval()
 
@@ -163,7 +171,7 @@ def sample_pd(initial_noise, device):
 
     del model, network
     th.cuda.empty_cache()
-    return th.cat(all_samples, dim=0), round_num, student_steps
+    return th.cat(all_samples, dim=0)
 
 
 def sample_mfm(exp_dir, initial_noise, device, n_steps=2, batch_size=64):
@@ -333,21 +341,24 @@ def main():
     # ===========================================================
     if args.skip_to <= 2:
         print("\n[Slide 2] Progressive Distillation...")
-        pd_result = sample_pd(initial_noise, device)
-        if pd_result[0] is not None:
-            pd_samples, pd_round, pd_steps = pd_result
-            pd_denorm = denormalize(pd_samples, data_min, data_max)
+        pd_ckpts = find_all_pd_checkpoints("darcy_pd/exp_1/saved_state")
+        if pd_ckpts:
+            pd_rows = [gt_row, teacher_row]
+            pd_hist = {"Ground Truth": real_denorm.flatten(),
+                       "Teacher (50 DDIM)": teacher_denorm[:args.n_hist].flatten()}
+            for ckpt_path, round_num, steps in pd_ckpts:
+                print(f"  PD round {round_num} ({steps} steps)...")
+                samples = sample_pd_checkpoint(ckpt_path, steps, initial_noise, device)
+                pd_denorm = denormalize(samples, data_min, data_max)
+                pd_rows.append((f"PD\n({steps} steps)", pd_denorm[:args.n_show]))
+                pd_hist[f"PD ({steps} steps)"] = pd_denorm[:args.n_hist].flatten()
             plot_sample_grid(
-                [gt_row, teacher_row,
-                 (f"Prog. Distillation\n(round {pd_round}, {pd_steps} steps)", pd_denorm[:args.n_show])],
-                args.n_show,
+                pd_rows, args.n_show,
                 "Progressive Distillation",
                 os.path.join(args.output_dir, "slide2_progressive_distillation.png"),
             )
             plot_histogram(
-                {"Ground Truth": real_denorm.flatten(),
-                 "Teacher (50 DDIM)": teacher_denorm[:args.n_hist].flatten(),
-                 f"PD (round {pd_round}, {pd_steps} steps)": pd_denorm[:args.n_hist].flatten()},
+                pd_hist,
                 "Progressive Distillation: Distribution",
                 os.path.join(args.output_dir, "slide2_pd_histogram.png"),
             )
@@ -365,7 +376,7 @@ def main():
             cd_denorm = denormalize(cd_samples, data_min, data_max)
             plot_sample_grid(
                 [gt_row, teacher_row,
-                 (f"Consistency Distillation\n(epoch {cd_epoch}, 16 steps)", cd_denorm[:args.n_show])],
+                 ("Consistency Distillation\n(16 steps)", cd_denorm[:args.n_show])],
                 args.n_show,
                 "Consistency Distillation",
                 os.path.join(args.output_dir, "slide3_consistency_distillation.png"),
@@ -373,7 +384,7 @@ def main():
             plot_histogram(
                 {"Ground Truth": real_denorm.flatten(),
                  "Teacher (50 DDIM)": teacher_denorm[:args.n_hist].flatten(),
-                 f"CD baseline (epoch {cd_epoch})": cd_denorm[:args.n_hist].flatten()},
+                 "CD baseline (16 steps)": cd_denorm[:args.n_hist].flatten()},
                 "Consistency Distillation: Distribution",
                 os.path.join(args.output_dir, "slide3_cd_histogram.png"),
             )
@@ -446,11 +457,11 @@ def main():
                 if result[0] is not None:
                     samples, epoch = result
                     mfm_denorm = denormalize(samples, data_min, data_max)
-                    row_label = f"{label}\n({n_steps}-step, ep {epoch})"
+                    row_label = f"{label}\n({n_steps}-step)"
                     mfm_rows.append((row_label, mfm_denorm[:args.n_show]))
                     if n_steps == 2:
                         clean = label.replace("\n", " ")
-                        mfm_hist[f"{clean} (ep {epoch})"] = mfm_denorm[:args.n_hist].flatten()
+                        mfm_hist[clean] = mfm_denorm[:args.n_hist].flatten()
                     has_mfm = True
 
         if has_mfm:
@@ -491,9 +502,9 @@ def main():
             if result[0] is not None:
                 samples, epoch = result
                 exp_denorm = denormalize(samples, data_min, data_max)
-                moment_rows.append((f"{label}\n(ep {epoch})", exp_denorm[:args.n_show]))
+                moment_rows.append((label, exp_denorm[:args.n_show]))
                 clean = label.replace("\n", " ")
-                moment_hist[f"{clean} (ep {epoch})"] = exp_denorm[:args.n_hist].flatten()
+                moment_hist[clean] = exp_denorm[:args.n_hist].flatten()
                 has_moment = True
             else:
                 print(f"  WARNING: No checkpoint for {name}, skipping")
