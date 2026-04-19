@@ -17,7 +17,10 @@ import os
 TEST_INDICES_PATH = "data/test_indices.npy"
 
 # Number of held-out Darcy samples used for every paper-facing evaluation.
-N_TEST_SAMPLES = 500
+# 1000 = use all available held-out samples (total 10k, 9k train). Matches
+# DiffusionPDE (NeurIPS 2024) which reports metrics "averaged across 1,000
+# random scenes and observations for each PDE".
+N_TEST_SAMPLES = 1000
 
 # ---------------------------------------------------------------------------
 # Sampling
