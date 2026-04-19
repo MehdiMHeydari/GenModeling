@@ -33,7 +33,7 @@ Non-obvious findings we've learned. Check here before changing a default or re-i
 
 ## Evaluation conventions (for paper)
 
-- **Test sample count**: 500 (compromise between DiffusionPDE's 1000 and PhysicsNeMo's 100).
+- **Test sample count**: 1000 (all available held-out samples; matches DiffusionPDE's 1000-scene convention).
 - **Seeds per config**: 3 (diffusion-paper standard; produces error bars).
 - **Locked test indices**: store in `data/test_indices.npy`, use across every eval run.
 - **Metric to trust for sample quality**: 1-Wasserstein on marginal pixel distribution.
