@@ -1,30 +1,20 @@
 # Active Work
 
-## [EVAL] Lock test indices + noise seeds (do first)
-- Write `data/test_indices.npy` with 500 held-out indices
-- Create `src/eval/constants.py` defining:
-  - `TEST_INDICES_PATH = "data/test_indices.npy"`
-  - `PAPER_SEEDS = [0, 1, 2]`
-  - `N_TEST_SAMPLES = 500`
-  - `TEACHER_DDIM_STEPS = 250`
-- All new eval/regeneration scripts import from here
-- ~10 min of work, one-time
-
-## [INFRA] Fix `scripts/precompute_teacher_moments.py`
-- Bump `DDIM_STEPS = 50` → import from `src/eval/constants.py` (= 250)
-- Use locked test indices + seed from constants
-- Skip `scripts/generate_presentation.py` — it's legacy slide-deck code, not paper-critical
-
-## [MOMENT] Regenerate `teacher_moments.pt` on server
-- Blocked on the above two
-- Run: `python scripts/precompute_teacher_moments.py --gpu <X> --n_samples 1000`
-- Output: `darcy_teacher/exp_1/saved_state/teacher_moments.pt` (overwrite)
-
-## [MOMENT] Restart moment matching experiments on new moments
-- Blocked on `teacher_moments.pt` regeneration
-- Exp 18, 19, 20, 21, 22 — all currently on stale (50-step) moments
-- Decide: restart from scratch, or resume from current epoch with new moments?
+## [PAPER] Generate visual sample figures
+- `scripts/generate_paper_figures.py` produces `sample_grid.png` + `histograms.png`
+- Next step after initial numeric eval
+- Run: `python scripts/generate_paper_figures.py --gpu <X>`
 
 ## [PAPER] Fill in `paper/main.tex` Methods section
 - Methods section can be written now (doesn't depend on numbers)
-- Experiments section stays as lipsum until unified eval results exist
+- Use content from `EXPERIMENT_LOG.md` + session discussion for each subsection
+- Experiments section stays as lipsum until all numeric results + figures are finalized
+
+## [EVAL] Decide whether to re-train MM on fresh teacher moments
+- The evaluated MM-exp20/21/22 checkpoints were **trained against stale 50-step teacher moments**.
+  `teacher_moments.pt` has since been regenerated with 250-step samples.
+- Question: are the stale-moment MM checkpoints good enough, or do we restart training on fresh moments?
+- Evidence for "good enough": MM-exp22 already gets WD 0.049 vs CD baseline 0.126 (2.6× improvement). Story is solid.
+- Evidence for "restart": targets they're optimizing against aren't what we claim in the paper.
+- Cost of restart: ~1 day per variant × 3 variants.
+- Pragmatic option: re-evaluate current checkpoints on the fresh moments as a sanity check before deciding.
