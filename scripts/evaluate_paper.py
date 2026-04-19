@@ -174,11 +174,10 @@ def sample_rf(ckpt, n_steps, noise, device, batch_size=64):
     model.network.eval()
 
     sampler = RectifiedFlowSampler(model)
-    t_span_kwargs = {"start": 0, "end": 1, "steps": n_steps + 1}
     out = []
     for i in range(0, noise.shape[0], batch_size):
         z = noise[i:i+batch_size].to(device)
-        out.append(sampler.sample(z, t_span_kwargs=t_span_kwargs).cpu())
+        out.append(sampler.sample(z, num_steps=n_steps).cpu())
     del model, network
     th.cuda.empty_cache()
     return th.cat(out, dim=0), n_steps
