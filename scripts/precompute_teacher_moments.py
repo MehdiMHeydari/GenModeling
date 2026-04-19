@@ -1,6 +1,9 @@
 """
-Pre-compute teacher distribution moments from 1000 DDIM samples and save to disk.
+Pre-compute teacher distribution moments from DDIM samples and save to disk.
 These are used as targets for the sampling-based moment loss during CD training.
+
+Settings are pulled from `src.eval.constants` so teacher sampling is locked
+to the canonical paper config (250 DDIM steps, ckpt 200, seed 0).
 
 Usage:
     python scripts/precompute_teacher_moments.py --gpu 0 --n_samples 1000
@@ -14,10 +17,13 @@ import numpy as np
 from src.models.networks.unet.unet import UNetModelWrapper as UNetModel
 from src.models.vp_diffusion import VPDiffusionModel
 from src.models.diffusion_utils import ddim_step
+from src.eval.constants import (
+    TEACHER_CKPT, TEACHER_DDIM_STEPS, SCHEDULE_S, SINGLE_SEED, DATA_SHAPE,
+)
 
 
 UNET_CFG = dict(
-    dim=[1, 128, 128],
+    dim=list(DATA_SHAPE),
     channel_mult="1, 2, 4, 4",
     num_channels=64,
     num_res_blocks=2,
@@ -29,10 +35,6 @@ UNET_CFG = dict(
     class_cond=False,
     num_classes=None,
 )
-
-SCHEDULE_S = 0.008
-DDIM_STEPS = 50
-TEACHER_CKPT = "darcy_teacher/exp_1/saved_state/checkpoint_200.pt"
 
 
 def main():
@@ -52,18 +54,19 @@ def main():
     teacher.network.load_state_dict(state["model_state_dict"])
     teacher.to(device).eval()
 
-    # Sample
-    th.manual_seed(123)
-    ts = th.linspace(1.0, 0.0, DDIM_STEPS + 1, device=device)
+    # Sample (canonical: SINGLE_SEED, TEACHER_DDIM_STEPS from src.eval.constants)
+    th.manual_seed(SINGLE_SEED)
+    ts = th.linspace(1.0, 0.0, TEACHER_DDIM_STEPS + 1, device=device)
     batch_size = 64
     all_samples = []
 
-    print(f"Sampling {args.n_samples} from teacher (50 DDIM steps)...")
+    print(f"Sampling {args.n_samples} from teacher "
+          f"({TEACHER_DDIM_STEPS} DDIM steps, seed={SINGLE_SEED})...")
     with th.no_grad():
         for i in range(0, args.n_samples, batch_size):
             n = min(batch_size, args.n_samples - i)
-            z = th.randn(n, 1, 128, 128, device=device)
-            for step in range(DDIM_STEPS):
+            z = th.randn(n, *DATA_SHAPE, device=device)
+            for step in range(TEACHER_DDIM_STEPS):
                 t_batch = th.full((n,), ts[step].item(), device=device)
                 s_batch = th.full((n,), ts[step + 1].item(), device=device)
                 x_hat = teacher.predict_x(z, t_batch)
