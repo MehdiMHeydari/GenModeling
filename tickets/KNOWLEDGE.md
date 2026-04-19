@@ -50,3 +50,26 @@ Each sampler in `src/inference/samplers.py` has a different step-count kwarg —
 - **Locked test indices**: store in `data/test_indices.npy`, use across every eval run.
 - **Metric to trust for sample quality**: 1-Wasserstein on marginal pixel distribution.
 - **Metric to NOT trust naively**: pixel MSE — compares unpaired generated sample to unpaired GT sample, so reflects magnitude more than quality.
+
+## First-round benchmark findings (Darcy, 2026-04-19)
+
+Ranked by Wasserstein (lower = better); all at 1000 test samples × 3 seeds.
+
+| Method | Best step count | NFE | Wasserstein (mean) |
+|--------|-----------------|-----|--------------------|
+| Teacher | 250 | 250 | 0.023 |
+| RF | 5 | 5 | **0.031** (best few-step) |
+| RF | 1 | 1 | 0.039 |
+| MM-exp22 (mu=16, var=150) | 16 | 16 | 0.049 |
+| MM-exp21 (mu=4, var=200) | 16 | 16 | 0.050 |
+| Reflow | any (1-10) | 1-10 | ~0.068 |
+| MFM | any (2-16) | 2-16 | ~0.075 |
+| CD-16step (baseline) | 16 | 16 | 0.126 |
+| CD-8step | 8 | 8 | 0.231 |
+| CD-4step | 4 | 4 | 0.282 |
+
+**Paper-level implications:**
+- **Moment matching works**: 2.6× WD improvement over baseline CD-16step — the main contribution claim holds.
+- **RF is strongest few-step method** on Darcy — MM story is not "we beat everything" but "we fix CD". Direct-training flows may deserve more attention than distillation for PDE surrogates.
+- **Reflow and MFM have flat step-count response** — both unexpected. Listed as open investigations in BACKLOG.md.
+- **Never claim "X beats Y" from one dataset** — user requires at least one more PDE dataset (Navier-Stokes / Burgers) before paper conclusions.

@@ -35,3 +35,31 @@
 - `paper/main.tex` has 5-section structure (Intro / Related / Methods / Experiments / Conclusion)
 - Filled with lipsum placeholders for layout review
 - **Outcome:** Ready for real text fill-in.
+
+## [EVAL] Lock test indices + noise seeds
+- `src/eval/constants.py` defines canonical paper constants (N_TEST_SAMPLES=1000, PAPER_SEEDS=(0,1,2), TEACHER_DDIM_STEPS=250)
+- `scripts/lock_test_indices.py` writes `data/test_indices.npy` (1000 held-out samples, deterministic from seed 0)
+- **Outcome:** Every paper-facing eval now pulls from the same constants — results across methods and reruns are directly comparable.
+
+## [INFRA] Canonical teacher sampling at 250 DDIM steps
+- Bumped teacher DDIM steps from 50/75 to 250 everywhere paper-critical
+- Updated `scripts/precompute_teacher_moments.py` to import from constants
+- Regenerated `teacher_moments.pt` with 250-step samples
+- **Outcome:** Teacher baseline now produces near-perfect histogram match. WD 0.023 at 250 NFE on held-out data.
+
+## [EVAL] Built unified `scripts/evaluate_paper.py`
+- One script samples every method kind (teacher, CD, PD, RF, MFM) on locked test indices with locked seeds and writes metrics (MSE, Wasserstein, moment errors, NFE, wall-clock) to CSV.
+- Supports `--only` for selective runs and `--seeds` for single-seed quick tests.
+- Split eval across 3 GPUs overnight: A=Teacher+CD, B=MM variants, C=RF+Reflow+MFM.
+- **Outcome:** `results/eval_all.csv` has 57 rows covering all methods × step counts × 3 seeds. Foundation for every paper table and plot.
+
+## [EVAL] First-round Darcy numeric benchmark
+- Ran all methods through the unified eval.
+- Headline: Teacher WD 0.023 (250 NFE); RF @ 5 steps WD 0.031 (best few-step); MM-exp22 WD 0.049 @ 16 NFE; CD-16step baseline WD 0.126.
+- **Outcome:** Moment matching delivers 2.6× improvement over baseline CD — solid paper result. Surprise finding: direct RF beats distilled methods at lower NFE.
+
+## [BUG] RectifiedFlowSampler step-count bug
+- Discovered and fixed: `RectifiedFlowSampler.sample(z, num_steps=N)` takes `num_steps`, but `evaluate_paper.py` and `generate_presentation.py` were passing `t_span_kwargs` (MeanSampler's interface). Silently defaulted to 100 steps.
+- All prior RF/Reflow numbers and figures were at 100 steps regardless of requested count.
+- Fix: commit 67aed0e. Re-ran RF + Reflow with correct step counts.
+- **Outcome:** True step-count sweep for RF now shows quality is best at ~5 steps. Documented in `KNOWLEDGE.md`.
