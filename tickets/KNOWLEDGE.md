@@ -26,6 +26,18 @@ Non-obvious findings we've learned. Check here before changing a default or re-i
 - **CD 4-step mode-collapses** — main motivation for the moment-matching objective.
 - **Teacher moments were computed at 50 DDIM steps** (stale) — any moment-matching run before regenerating `teacher_moments.pt` is on incorrect targets.
 
+## Sampler interface gotcha (commit 67aed0e)
+
+Each sampler in `src/inference/samplers.py` has a different step-count kwarg — passing the wrong name silently uses a default, not an error:
+
+| Sampler | Correct kwarg |
+|---------|---------------|
+| `RectifiedFlowSampler.sample(z, num_steps=N)` | `num_steps` (default 100) |
+| `MeanSampler.sample(z, t_span_kwargs={"start":0,"end":1,"steps":N+1})` | `t_span_kwargs` |
+| `MultistepCMSampler.sample(z)` | none — step count is baked into `model.student_steps` |
+
+**Why this is dangerous:** all samplers take `**kwargs`, so passing e.g. `t_span_kwargs` to `RectifiedFlowSampler` compiles fine but silently falls back to `num_steps=100`. All RF/Reflow runs before commit 67aed0e were secretly at 100 steps regardless of the requested count. Presentation figures and the first `evaluate_paper.py` run are both affected.
+
 ## Dataset
 
 - 2D Darcy Flow: 9000 train, ~1000 test (exact test set needs locking for paper).
