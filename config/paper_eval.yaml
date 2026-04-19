@@ -1,0 +1,89 @@
+# Paper-facing unified evaluation config.
+#
+# Each entry is a model to evaluate under the locked paper protocol:
+#   - src/eval/constants.py supplies N_TEST_SAMPLES, PAPER_SEEDS, test indices
+#   - every method is sampled with the same noise seeds
+#   - every method is compared to the same held-out data
+#
+# Kinds:
+#   teacher:   VP diffusion teacher with DDIM sampling
+#   cd:        MultistepConsistencyModel (also used for moment-matching variants)
+#   pd:        Progressive distillation student (DDIM with its round's step count)
+#   rf:        Rectified flow / reflow checkpoint
+#   mfm:       Mean flow matching
+#
+# Fields:
+#   name         display name for the CSV
+#   kind         one of the kinds above
+#   ckpt         explicit checkpoint path (used by teacher, pd, rf)
+#   exp_dir      experiment dir — latest checkpoint is auto-picked (cd, mfm)
+#   student_steps  student step count for cd kind (baked into the model)
+#   step_counts  list of sampling step counts to sweep (e.g. [1, 5, 10])
+#   notes        free-form note for the CSV row
+
+methods:
+  # Teacher baseline
+  - name: "Teacher"
+    kind: "teacher"
+    ckpt: "darcy_teacher/exp_1/saved_state/checkpoint_200.pt"
+    step_counts: [250]
+
+  # Baseline CD students (no moment matching)
+  - name: "CD-4step"
+    kind: "cd"
+    exp_dir: "darcy_student/exp_1"
+    student_steps: 4
+    step_counts: [4]
+  - name: "CD-8step"
+    kind: "cd"
+    exp_dir: "darcy_student/exp_2"
+    student_steps: 8
+    step_counts: [8]
+  - name: "CD-16step"
+    kind: "cd"
+    exp_dir: "darcy_student/exp_3"
+    student_steps: 16
+    step_counts: [16]
+
+  # Moment matching — only the "best" variants per user selection.
+  # Update exp_dir to wherever these train artifacts live on the server.
+  - name: "MM-exp20"
+    kind: "cd"
+    exp_dir: "darcy_student/exp_20"
+    student_steps: 16
+    step_counts: [16]
+    notes: "moment_weight_mu=4.0, moment_weight_var=150.0"
+  - name: "MM-exp21"
+    kind: "cd"
+    exp_dir: "darcy_student/exp_21"
+    student_steps: 16
+    step_counts: [16]
+    notes: "moment_weight_mu=4.0, moment_weight_var=200.0"
+  - name: "MM-exp22"
+    kind: "cd"
+    exp_dir: "darcy_student/exp_22"
+    student_steps: 16
+    step_counts: [16]
+    notes: "moment_weight_mu=16.0, moment_weight_var=150.0"
+
+  # Rectified Flow + Reflow
+  - name: "RF"
+    kind: "rf"
+    ckpt: "darcy_rf/exp_1/saved_state/checkpoint_latest.pt"
+    step_counts: [1, 2, 5, 10]
+  - name: "Reflow"
+    kind: "rf"
+    ckpt: "darcy_rf_reflow/exp_1/saved_state/checkpoint_latest.pt"
+    step_counts: [1, 2, 5, 10]
+
+  # Mean Flow Matching
+  - name: "MFM"
+    kind: "mfm"
+    exp_dir: "darcy_mean_flow/exp_1"
+    step_counts: [2, 4, 8, 16]
+
+  # Progressive Distillation (one entry per round, ckpt paths to be filled in)
+  # - name: "PD-round6 (2 steps)"
+  #   kind: "pd"
+  #   ckpt: "darcy_pd/exp_1/saved_state/pd_round6_steps2.pt"
+  #   step_counts: [2]
