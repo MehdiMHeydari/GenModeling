@@ -67,19 +67,20 @@ methods:
     notes: "moment_weight_mu=16.0, moment_weight_var=150.0"
 
   # Rectified Flow + Reflow
+  # Paths from EXPERIMENT_LOG.md lines 705, 712.
   - name: "RF"
     kind: "rf"
-    ckpt: "darcy_rf/exp_1/saved_state/checkpoint_latest.pt"
+    ckpt: "darcy_rectified_flow/exp_1/saved_state/checkpoint_799.pt"
     step_counts: [1, 2, 5, 10]
   - name: "Reflow"
     kind: "rf"
-    ckpt: "darcy_rf_reflow/exp_1/saved_state/checkpoint_latest.pt"
+    ckpt: "darcy_rectified_flow_reflow/exp_1/saved_state/checkpoint_399.pt"
     step_counts: [1, 2, 5, 10]
 
-  # Mean Flow Matching
+  # Mean Flow Matching — exp_7 is the canonical one per user.
   - name: "MFM"
     kind: "mfm"
-    exp_dir: "darcy_mean_flow/exp_1"
+    exp_dir: "darcy_mean_flow/exp_7"
     step_counts: [2, 4, 8, 16]
 
   # Progressive Distillation (one entry per round, ckpt paths to be filled in)
