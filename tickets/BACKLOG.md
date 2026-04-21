@@ -22,11 +22,23 @@
 - `paper/main.tex` currently has lipsum
 - Order: Methods → Experiments → Related Work → Intro/Abstract/Conclusion last
 
-## [INFRA] Extend to additional PDE datasets (required before paper conclusions)
-- User explicitly wants a second dataset before claiming "X method is better than Y"
-- Candidates: Navier-Stokes (incompressible), Burgers, reaction-diffusion
-- Use PDEBench data to reduce provenance issues
-- Blocks the paper's final comparative claims
+## [INFRA] Second PDE dataset: Navier-Stokes (required before paper conclusions)
+- User explicitly wants a second dataset before claiming "X beats Y"
+- **Partial infrastructure already in place** (discovered 2026-04-21):
+  - `config/ns_teacher.yaml` — VP diffusion config (2 channels Vx/Vy, 128×128)
+  - `src/utils/dataloader.py` `get_ns_loader` — reads PDEBench HDF5 layout
+  - `loader_type: "ns"` wired through main loader
+- **Nothing trained yet** — no checkpoints, no numbers on NS
+- Blocking items:
+  1. Confirm `data/2D_NS_incom_inhom_Re10000_128.h5` exists on server (else download from PDEBench)
+  2. Train NS teacher (~1 day, 1 GPU)
+  3. Train NS RF + Reflow + MFM in parallel with teacher (all teacher-independent)
+  4. Train NS CD students (4/8/16) after teacher done (parallel on 3 GPUs)
+  5. Train NS MM variants (pinned to struct-diversity peak per the Darcy lesson)
+  6. Lock NS test indices → `data/ns_test_indices.npy`
+  7. Extend `evaluate_paper.py` to handle 2-channel data (currently hardcoded 1-channel)
+  8. Run unified eval on NS
+- Estimated total: 3-4 days GPU time + ~1 day of code extension
 
 ## [MOMENT] Design spatially-aware moment loss
 - Current moment loss aggregates over spatial dims before computing statistics,

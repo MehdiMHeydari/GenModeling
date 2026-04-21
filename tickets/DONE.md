@@ -58,6 +58,11 @@
 - Headline: Teacher WD 0.023 (250 NFE); RF @ 5 steps WD 0.031 (best few-step); MM-exp22 WD 0.049 @ 16 NFE; CD-16step baseline WD 0.126.
 - **Outcome:** Moment matching delivers 2.6× improvement over baseline CD — solid paper result. Surprise finding: direct RF beats distilled methods at lower NFE.
 
+## [METRIC] Add structural diversity metric
+- Added `structural_diversity` (mean pairwise L2 of per-sample center-of-mass) to `sweep_mm_checkpoints.py` and `evaluate_paper.py`.
+- Revealed: CD baseline has catastrophic structural collapse (19% of GT), despite high pixel-level diversity. Prior Wasserstein and pairwise-L2 metrics missed this.
+- **Outcome:** MM-exp21 at epoch 75 identified as the real diversity peak (54% of GT). Paper-level reframing: MM is a genuine 2.8× improvement over CD, not a lateral move.
+
 ## [BUG] RectifiedFlowSampler step-count bug
 - Discovered and fixed: `RectifiedFlowSampler.sample(z, num_steps=N)` takes `num_steps`, but `evaluate_paper.py` and `generate_presentation.py` were passing `t_span_kwargs` (MeanSampler's interface). Silently defaulted to 100 steps.
 - All prior RF/Reflow numbers and figures were at 100 steps regardless of requested count.
