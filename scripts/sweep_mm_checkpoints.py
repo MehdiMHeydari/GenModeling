@@ -27,10 +27,12 @@ import matplotlib.pyplot as plt
 
 from src.eval.constants import (
     DATA_PATH, DATA_SHAPE, SCHEDULE_S, STATS_DIR, SINGLE_SEED,
-    load_test_indices,
+    TEACHER_CKPT, TEACHER_DDIM_STEPS, load_test_indices,
 )
 from src.models.networks.unet.unet import UNetModelWrapper as UNetModel
 from src.models.consistency_models import MultistepConsistencyModel
+from src.models.vp_diffusion import VPDiffusionModel
+from src.models.diffusion_utils import ddim_step
 from src.inference.samplers import MultistepCMSampler
 
 
@@ -86,6 +88,28 @@ def sample_from_state(model, sampler, state_path, noise, device):
     return sampler.sample(noise.to(device)).cpu()
 
 
+@th.no_grad()
+def sample_teacher(noise, device, n_steps=TEACHER_DDIM_STEPS):
+    network = UNetModel(**UNET_CFG)
+    teacher = VPDiffusionModel(network=network, schedule_s=SCHEDULE_S, infer=True)
+    state = th.load(TEACHER_CKPT, map_location="cpu", weights_only=True)
+    teacher.network.load_state_dict(state["model_state_dict"])
+    teacher.to(device).eval()
+
+    ts = th.linspace(1.0, 0.0, n_steps + 1, device=device)
+    z = noise.to(device)
+    n = z.shape[0]
+    for step in range(n_steps):
+        t = th.full((n,), ts[step].item(), device=device)
+        s = th.full((n,), ts[step + 1].item(), device=device)
+        x_hat = teacher.predict_x(z, t)
+        z = ddim_step(x_hat, z, t, s, SCHEDULE_S)
+    samples = z.cpu()
+    del teacher, network
+    th.cuda.empty_cache()
+    return samples
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--gpu", type=int, default=0)
@@ -126,6 +150,25 @@ def main():
     noise = th.randn(args.n_show, *DATA_SHAPE, generator=gen)
 
     rows = [("Ground Truth", gt_denorm, gt_diversity)]
+
+    # Teacher reference — same noise as MM students get
+    print("Sampling Teacher (reference target)...")
+    teacher_samples = sample_teacher(noise, device)
+    teacher_denorm = denormalize(teacher_samples, data_min, data_max)
+    teacher_div = diversity_score(teacher_denorm)
+    rows.append((f"Teacher\n(ref target)  div={teacher_div:.3f}",
+                 teacher_denorm, teacher_div))
+
+    # CD baseline (no moment matching) for reference
+    cd_baseline_ckpt = "darcy_student/exp_3/saved_state/checkpoint_999.pt"
+    if os.path.exists(cd_baseline_ckpt):
+        print("Sampling CD baseline (no moment)...")
+        cd_samples = sample_from_state(model, sampler, cd_baseline_ckpt,
+                                       noise, device)
+        cd_denorm = denormalize(cd_samples, data_min, data_max)
+        cd_div = diversity_score(cd_denorm)
+        rows.append((f"CD baseline\n(no moment)  div={cd_div:.3f}",
+                     cd_denorm, cd_div))
 
     for exp_dir, label, max_epoch in MM_EXPERIMENTS:
         for epoch in args.epochs:
