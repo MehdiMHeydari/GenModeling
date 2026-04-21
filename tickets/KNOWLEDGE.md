@@ -51,6 +51,39 @@ Each sampler in `src/inference/samplers.py` has a different step-count kwarg —
 - **Metric to trust for sample quality**: 1-Wasserstein on marginal pixel distribution.
 - **Metric to NOT trust naively**: pixel MSE — compares unpaired generated sample to unpaired GT sample, so reflects magnitude more than quality.
 
+## Diversity metrics — 1D Wasserstein is not enough (2026-04-21)
+
+Mode collapse in distilled few-step generators is not caught by 1D Wasserstein
+on flattened pixels, nor by pairwise-L2 pixel diversity. Both can be fooled
+by "same-shape-different-size" mode collapse.
+
+**The right metric**: `structural_diversity` = mean pairwise L2 of per-sample
+center-of-mass. High `pix` + low `struct` = structurally collapsed.
+
+Example, epoch 999 checkpoints on Darcy:
+- GT: pix=15.80, struct=12.40
+- Teacher: pix=16.14, struct=9.56 (77% of GT) — diverse
+- CD baseline: pix=18.38, struct=2.33 (**19% of GT**) — catastrophically collapsed despite high pix
+- MM-exp21 (mu=4, var=200) @ epoch 75: pix=10.23, struct=6.65 (54% of GT) — best student
+
+**MM is a legitimate fix** for CD's structural collapse (2.8× improvement),
+but **only at the diversity peak around epoch 75**. Later checkpoints
+collapse again because the 1D moment loss aggregates away spatial
+information and can be satisfied by narrow output modes.
+
+## MM loss is spatially blind
+
+The moment loss computes four scalars:
+- mean/var of per-sample spatial mean
+- mean/var of per-sample spatial variance
+
+All spatial structure is aggregated away before the loss is evaluated.
+This means two totally different-looking batches (e.g. varied-shape vs
+centered-blobs-with-varied-intensity) can have identical moments. See
+commit logs and `scripts/sweep_mm_checkpoints.py` discussion for details.
+Future work: spatially-aware moment loss (per-pixel moments, spatial power
+spectrum, or explicit COM penalty) — tracked in BACKLOG.md.
+
 ## First-round benchmark findings (Darcy, 2026-04-19)
 
 Ranked by Wasserstein (lower = better); all at 1000 test samples × 3 seeds.

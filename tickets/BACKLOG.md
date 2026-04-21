@@ -28,6 +28,17 @@
 - Use PDEBench data to reduce provenance issues
 - Blocks the paper's final comparative claims
 
+## [MOMENT] Design spatially-aware moment loss
+- Current moment loss aggregates over spatial dims before computing statistics,
+  so it can't enforce spatial structure. Student satisfies it by producing
+  varied-intensity samples with identical structure (see KNOWLEDGE.md).
+- Candidate fixes:
+  1. **Per-pixel moments**: match mean/var at each pixel location across batch
+  2. **Patch-level moments**: divide image into patches, match moments per patch
+  3. **Spatial power spectrum**: match 2D FFT power spectrum distribution
+  4. **Explicit COM penalty**: add term that penalizes low center-of-mass variance
+- If any of these work, promotes MM from "fix at epoch 75" to "fix throughout training"
+
 ## [RF] Investigate why Reflow underperforms RF
 - Evaluated numbers: RF @ 5 steps WD 0.031, Reflow @ 5 steps WD 0.068
 - Reflow should straighten trajectories and improve few-step quality — here it made things worse.
