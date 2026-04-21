@@ -67,6 +67,8 @@ def denormalize(samples, data_min, data_max):
 
 
 def diversity_score(samples):
+    """Mean pairwise L2 distance over flattened pixels.
+    Captures *pixel-level* variation (including same-shape-different-size)."""
     flat = samples.reshape(samples.shape[0], -1)
     n = flat.shape[0]
     total = 0.0
@@ -76,6 +78,37 @@ def diversity_score(samples):
             total += float(np.linalg.norm(flat[i] - flat[j]))
             count += 1
     return total / max(count, 1)
+
+
+def structural_diversity(samples):
+    """
+    Mean pairwise L2 distance of per-sample center-of-mass.
+
+    Captures *structural* variation: where is the mass in each field?
+    - High value: each sample puts its active region in a different spatial location.
+    - Low value: all samples put their mass in the same place (mode collapse in shape).
+
+    Complements `diversity_score` which can be fooled by same-shape-different-size.
+    """
+    n, c, h, w = samples.shape
+    y_coords, x_coords = np.meshgrid(
+        np.arange(h), np.arange(w), indexing="ij"
+    )
+    coms = np.zeros((n, 2))
+    for i in range(n):
+        arr = samples[i, 0]
+        shifted = arr - arr.min() + 1e-8  # shift to positive for weighting
+        total = shifted.sum()
+        coms[i, 0] = (x_coords * shifted).sum() / total
+        coms[i, 1] = (y_coords * shifted).sum() / total
+
+    total_dist = 0.0
+    count = 0
+    for i in range(n):
+        for j in range(i + 1, n):
+            total_dist += float(np.linalg.norm(coms[i] - coms[j]))
+            count += 1
+    return total_dist / max(count, 1)
 
 
 @th.no_grad()
@@ -144,20 +177,26 @@ def main():
     test_idx = load_test_indices()
     gt_denorm = data[test_idx[:args.n_show]]
     gt_diversity = diversity_score(gt_denorm)
+    gt_struct = structural_diversity(gt_denorm)
 
     # Deterministic noise
     gen = th.Generator().manual_seed(SINGLE_SEED)
     noise = th.randn(args.n_show, *DATA_SHAPE, generator=gen)
 
-    rows = [("Ground Truth", gt_denorm, gt_diversity)]
+    def make_row(label, denorm):
+        d = diversity_score(denorm)
+        s = structural_diversity(denorm)
+        label_with_metrics = f"{label}\npix={d:.2f}  struct={s:.2f}"
+        return (label_with_metrics, denorm, d, s)
+
+    rows = [(f"Ground Truth\npix={gt_diversity:.2f}  struct={gt_struct:.2f}",
+             gt_denorm, gt_diversity, gt_struct)]
 
     # Teacher reference — same noise as MM students get
     print("Sampling Teacher (reference target)...")
     teacher_samples = sample_teacher(noise, device)
     teacher_denorm = denormalize(teacher_samples, data_min, data_max)
-    teacher_div = diversity_score(teacher_denorm)
-    rows.append((f"Teacher\n(ref target)  div={teacher_div:.3f}",
-                 teacher_denorm, teacher_div))
+    rows.append(make_row("Teacher (ref target)", teacher_denorm))
 
     # CD baseline (no moment matching) for reference
     cd_baseline_ckpt = "darcy_student/exp_3/saved_state/checkpoint_999.pt"
@@ -166,9 +205,7 @@ def main():
         cd_samples = sample_from_state(model, sampler, cd_baseline_ckpt,
                                        noise, device)
         cd_denorm = denormalize(cd_samples, data_min, data_max)
-        cd_div = diversity_score(cd_denorm)
-        rows.append((f"CD baseline\n(no moment)  div={cd_div:.3f}",
-                     cd_denorm, cd_div))
+        rows.append(make_row("CD baseline (no moment)", cd_denorm))
 
     for exp_dir, label, max_epoch in MM_EXPERIMENTS:
         for epoch in args.epochs:
@@ -181,8 +218,7 @@ def main():
             print(f"Sampling {label} epoch={epoch}...")
             samples = sample_from_state(model, sampler, ckpt, noise, device)
             denorm = denormalize(samples, data_min, data_max)
-            div = diversity_score(denorm)
-            rows.append((f"{label}\nepoch={epoch}  div={div:.3f}", denorm, div))
+            rows.append(make_row(f"{label} epoch={epoch}", denorm))
 
     # Plot
     n_rows = len(rows)
@@ -191,7 +227,7 @@ def main():
         figsize=(1.6 * args.n_show, 1.6 * n_rows),
         squeeze=False,
     )
-    for i, (label, arr, _) in enumerate(rows):
+    for i, (label, arr, _, _) in enumerate(rows):
         for j in range(args.n_show):
             axes[i, j].imshow(arr[j, 0], cmap=CMAP)
             axes[i, j].axis("off")
@@ -207,10 +243,17 @@ def main():
     plt.close(fig)
 
     print(f"\nSaved {args.output}")
-    print(f"\nDiversity scores (higher = more diverse; GT = {gt_diversity:.3f}):")
-    for label, _, div in rows:
+    print(f"\nDiversity scores:")
+    print(f"  pix = mean pairwise L2 (captures any pixel variation)")
+    print(f"  struct = center-of-mass pairwise L2 (captures spatial location variation)")
+    print(f"  GT reference: pix={gt_diversity:.2f}  struct={gt_struct:.2f}")
+    print()
+    print(f"  {'method':<40s}  {'pix':>7s}  {'struct':>7s}  "
+          f"{'pix/GT':>7s}  {'struct/GT':>9s}")
+    for label, _, div, struct in rows:
         short = label.replace("\n", " ")
-        print(f"  {short:60s}  div={div:.3f}  ratio={div/gt_diversity:.2f}")
+        print(f"  {short:<40s}  {div:7.2f}  {struct:7.2f}  "
+              f"{div/gt_diversity:7.2f}  {struct/gt_struct:9.2f}")
 
 
 if __name__ == "__main__":
