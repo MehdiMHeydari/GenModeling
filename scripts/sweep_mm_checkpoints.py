@@ -6,9 +6,13 @@ Sample each MM experiment at multiple training epochs to find where
     cols = N_SHOW samples from fixed seed
     row label includes the diversity metric (mean pairwise L2 between samples)
 
+Fast version: the UNet and consistency model are built ONCE, and state_dicts
+are swapped between checkpoints. Typical sweep of ~12 checkpoints runs in
+~30 seconds on an A100.
+
 Usage:
     python scripts/sweep_mm_checkpoints.py --gpu 0
-    python scripts/sweep_mm_checkpoints.py --gpu 0 --epochs 100 250 500 750
+    python scripts/sweep_mm_checkpoints.py --gpu 0 --epochs 25 50 75 100
 """
 
 import argparse
@@ -25,10 +29,26 @@ from src.eval.constants import (
     DATA_PATH, DATA_SHAPE, SCHEDULE_S, STATS_DIR, SINGLE_SEED,
     load_test_indices,
 )
-from scripts.evaluate_paper import sample_cd, denormalize, make_noise
+from src.models.networks.unet.unet import UNetModelWrapper as UNetModel
+from src.models.consistency_models import MultistepConsistencyModel
+from src.inference.samplers import MultistepCMSampler
 
 
 CMAP = "RdBu_r"
+
+UNET_CFG = dict(
+    dim=list(DATA_SHAPE),
+    channel_mult="1, 2, 4, 4",
+    num_channels=64,
+    num_res_blocks=2,
+    num_head_channels=32,
+    attention_resolutions="32",
+    dropout=0.0,
+    use_new_attention_order=True,
+    use_scale_shift_norm=True,
+    class_cond=False,
+    num_classes=None,
+)
 
 # (experiment_dir, short_label, max_epoch)
 MM_EXPERIMENTS = [
@@ -38,8 +58,13 @@ MM_EXPERIMENTS = [
 ]
 
 
+def denormalize(samples, data_min, data_max):
+    if isinstance(samples, th.Tensor):
+        samples = samples.cpu().numpy()
+    return (samples + 1.0) / 2.0 * (data_max - data_min) + data_min
+
+
 def diversity_score(samples):
-    """Mean pairwise L2 distance between samples. Higher = more diverse."""
     flat = samples.reshape(samples.shape[0], -1)
     n = flat.shape[0]
     total = 0.0
@@ -49,6 +74,16 @@ def diversity_score(samples):
             total += float(np.linalg.norm(flat[i] - flat[j]))
             count += 1
     return total / max(count, 1)
+
+
+@th.no_grad()
+def sample_from_state(model, sampler, state_path, noise, device):
+    state = th.load(state_path, map_location="cpu", weights_only=True)
+    model.network.load_state_dict(state["model_state_dict"])
+    if "ema_state_dict" in state and model.ema_network is not None:
+        model.ema_network.load_state_dict(state["ema_state_dict"])
+    model.to(device).eval()
+    return sampler.sample(noise.to(device)).cpu()
 
 
 def main():
@@ -66,7 +101,16 @@ def main():
     device = "cuda" if th.cuda.is_available() else "cpu"
     os.makedirs(os.path.dirname(args.output), exist_ok=True)
 
-    # Load GT reference
+    # Build model + sampler ONCE
+    network = UNetModel(**UNET_CFG)
+    model = MultistepConsistencyModel(
+        network=network, student_steps=args.student_steps,
+        schedule_s=SCHEDULE_S, infer=True,
+    )
+    model.to(device).eval()
+    sampler = MultistepCMSampler(model)
+
+    # GT reference
     data_min = np.load(os.path.join(STATS_DIR, "data_min.npy"))
     data_max = np.load(os.path.join(STATS_DIR, "data_max.npy"))
     with h5py.File(DATA_PATH, "r") as f:
@@ -77,10 +121,11 @@ def main():
     gt_denorm = data[test_idx[:args.n_show]]
     gt_diversity = diversity_score(gt_denorm)
 
-    noise = make_noise(SINGLE_SEED, args.n_show, DATA_SHAPE)
+    # Deterministic noise
+    gen = th.Generator().manual_seed(SINGLE_SEED)
+    noise = th.randn(args.n_show, *DATA_SHAPE, generator=gen)
 
-    rows = []
-    rows.append(("Ground Truth", gt_denorm, gt_diversity))
+    rows = [("Ground Truth", gt_denorm, gt_diversity)]
 
     for exp_dir, label, max_epoch in MM_EXPERIMENTS:
         for epoch in args.epochs:
@@ -91,12 +136,12 @@ def main():
                 print(f"[skip] {ckpt} missing")
                 continue
             print(f"Sampling {label} epoch={epoch}...")
-            samples, _ = sample_cd(ckpt, args.student_steps, noise, device)
+            samples = sample_from_state(model, sampler, ckpt, noise, device)
             denorm = denormalize(samples, data_min, data_max)
             div = diversity_score(denorm)
             rows.append((f"{label}\nepoch={epoch}  div={div:.3f}", denorm, div))
 
-    # Plot grid
+    # Plot
     n_rows = len(rows)
     fig, axes = plt.subplots(
         n_rows, args.n_show,
