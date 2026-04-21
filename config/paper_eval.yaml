@@ -45,26 +45,29 @@ methods:
     student_steps: 16
     step_counts: [16]
 
-  # Moment matching — only the "best" variants per user selection.
-  # Update exp_dir to wherever these train artifacts live on the server.
+  # Moment matching — pinned to checkpoint_75.pt per structural-diversity
+  # sweep (see tickets/KNOWLEDGE.md): structural diversity peaks at epoch 75
+  # for all three variants, with exp_21 reaching 54% of GT struct-diversity.
+  # Later checkpoints satisfy the moment loss by collapsing to a narrow region
+  # of output space.
   - name: "MM-exp20"
     kind: "cd"
-    exp_dir: "darcy_student/exp_20"
+    ckpt: "darcy_student/exp_20/saved_state/checkpoint_75.pt"
     student_steps: 16
     step_counts: [16]
-    notes: "moment_weight_mu=4.0, moment_weight_var=150.0"
+    notes: "mu=4.0, var=150.0 — epoch 75 (struct-diversity peak)"
   - name: "MM-exp21"
     kind: "cd"
-    exp_dir: "darcy_student/exp_21"
+    ckpt: "darcy_student/exp_21/saved_state/checkpoint_75.pt"
     student_steps: 16
     step_counts: [16]
-    notes: "moment_weight_mu=4.0, moment_weight_var=200.0"
+    notes: "mu=4.0, var=200.0 — epoch 75 (struct-diversity peak)"
   - name: "MM-exp22"
     kind: "cd"
-    exp_dir: "darcy_student/exp_22"
+    ckpt: "darcy_student/exp_22/saved_state/checkpoint_75.pt"
     student_steps: 16
     step_counts: [16]
-    notes: "moment_weight_mu=16.0, moment_weight_var=150.0"
+    notes: "mu=16.0, var=150.0 — epoch 75 (struct-diversity peak)"
 
   # Rectified Flow + Reflow
   # Paths from EXPERIMENT_LOG.md lines 705, 712.

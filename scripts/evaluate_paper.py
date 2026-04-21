@@ -215,6 +215,44 @@ KIND_SAMPLERS = {
 }
 
 
+def pairwise_l2_diversity(samples, cap=256):
+    """Mean pairwise L2 distance on flattened pixels. Captures any variation
+    (including same-shape-different-intensity, so can overstate diversity)."""
+    if samples.shape[0] > cap:
+        samples = samples[:cap]
+    flat = samples.reshape(samples.shape[0], -1)
+    n = flat.shape[0]
+    total, count = 0.0, 0
+    for i in range(n):
+        for j in range(i + 1, n):
+            total += float(np.linalg.norm(flat[i] - flat[j]))
+            count += 1
+    return total / max(count, 1)
+
+
+def structural_diversity(samples, cap=256):
+    """Mean pairwise L2 of per-sample center-of-mass. Captures spatial
+    structural variation (where is the mass); catches mode collapse that
+    pairwise_l2 misses."""
+    if samples.shape[0] > cap:
+        samples = samples[:cap]
+    n, _, h, w = samples.shape
+    y_coords, x_coords = np.meshgrid(np.arange(h), np.arange(w), indexing="ij")
+    coms = np.zeros((n, 2))
+    for i in range(n):
+        arr = samples[i, 0]
+        shifted = arr - arr.min() + 1e-8
+        total = shifted.sum()
+        coms[i, 0] = (x_coords * shifted).sum() / total
+        coms[i, 1] = (y_coords * shifted).sum() / total
+    total_dist, count = 0.0, 0
+    for i in range(n):
+        for j in range(i + 1, n):
+            total_dist += float(np.linalg.norm(coms[i] - coms[j]))
+            count += 1
+    return total_dist / max(count, 1)
+
+
 def compute_metrics(gen_denorm, real_denorm):
     gen_flat = gen_denorm.flatten()
     real_flat = real_denorm.flatten()
@@ -235,6 +273,8 @@ def compute_metrics(gen_denorm, real_denorm):
         "std_err": abs(float(gen_denorm.std()) - float(real_denorm.std())),
         "skew_err": abs(skew(gen_flat[:cap]) - skew(real_flat[:cap])),
         "kurt_err": abs(kurt(gen_flat[:cap]) - kurt(real_flat[:cap])),
+        "pix_diversity": pairwise_l2_diversity(gen_denorm),
+        "struct_diversity": structural_diversity(gen_denorm),
     }
 
 
@@ -296,7 +336,8 @@ def main():
         writer.writerow([
             "method", "kind", "ckpt", "step_count", "seed", "nfe",
             "pixel_mse", "wasserstein", "mean_err", "std_err",
-            "skew_err", "kurt_err", "wall_clock_s", "notes",
+            "skew_err", "kurt_err", "pix_diversity", "struct_diversity",
+            "wall_clock_s", "notes",
         ])
 
     for entry in methods:
@@ -332,11 +373,13 @@ def main():
                     entry["name"], kind, ckpt, n_steps, seed, nfe,
                     m["pixel_mse"], m["wasserstein"], m["mean_err"],
                     m["std_err"], m["skew_err"], m["kurt_err"],
+                    m["pix_diversity"], m["struct_diversity"],
                     wall, entry.get("notes", ""),
                 ])
                 out_f.flush()
                 print(f"  [{entry['name']}] steps={n_steps} seed={seed} "
                       f"WD={m['wasserstein']:.4f} "
+                      f"struct={m['struct_diversity']:.2f} "
                       f"MSE={m['pixel_mse']:.4f} ({wall:.1f}s)")
 
     out_f.close()
