@@ -15,7 +15,7 @@ set -e
 
 TEACHER_CONFIG="config/ns_teacher.yaml"
 CD_CONFIG="config/ns_cm_cd.yaml"
-TEACHER_FINAL_CKPT="ns_teacher/exp_1/saved_state/checkpoint_399.pt"
+TEACHER_FINAL_CKPT="ns_teacher/exp_1/saved_state/checkpoint_599.pt"
 
 echo "============================================"
 echo " NS Teacher → CD Chain"
@@ -24,7 +24,7 @@ echo "GPU: ${CUDA_VISIBLE_DEVICES:-default}"
 echo ""
 
 # --- Step 1: Train teacher ---
-echo "[1/2] Training NS teacher (400 epochs)..."
+echo "[1/2] Training NS teacher (600 epochs)..."
 python scripts/train_vp_diffusion.py "$TEACHER_CONFIG"
 
 # --- Step 2: Verify teacher finished ---
