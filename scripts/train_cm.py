@@ -144,8 +144,12 @@ def main(config_path):
     optim = Adam(model.network.parameters(), lr=config.optimizer.lr)
 
     # --- Weights & Biases ---
+    # Derive project from config.path so NS / Darcy / future datasets each get
+    # their own wandb project (e.g. darcy-student, ns-student).
+    loader_type = config.dataloader.get("loader_type", "darcy")
+    wandb_project = config.get("wandb_project", f"{loader_type}-student")
     wandb.init(
-        project="darcy-student",
+        project=wandb_project,
         name=f"cd_exp{config.exp_num}",
         config=OmegaConf.to_container(config, resolve=True),
     )
