@@ -101,8 +101,10 @@ def main(config_path):
     optim = Adam(model.network.parameters(), lr=config.optimizer.lr)
 
     # --- Weights & Biases ---
+    loader_type = config.dataloader.get("loader_type", "darcy")
+    wandb_project = config.get("wandb_project", f"{loader_type}-teacher")
     wandb.init(
-        project="darcy-teacher",
+        project=wandb_project,
         name=f"vp_diffusion_exp{config.exp_num}",
         config=OmegaConf.to_container(config, resolve=True),
     )

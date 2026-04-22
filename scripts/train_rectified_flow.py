@@ -138,8 +138,10 @@ def main(config_path):
 
     # --- Weights & Biases ---
     run_name = f"rf_reflow_exp{config.exp_num}" if reflow else f"rf_exp{config.exp_num}"
+    loader_type = config.get("dataloader", {}).get("loader_type", "darcy")
+    wandb_project = config.get("wandb_project", f"{loader_type}-rectified-flow")
     wandb.init(
-        project="darcy-rectified-flow",
+        project=wandb_project,
         name=run_name,
         config=OmegaConf.to_container(config, resolve=True),
     )
