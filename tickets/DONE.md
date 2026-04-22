@@ -63,6 +63,31 @@
 - Revealed: CD baseline has catastrophic structural collapse (19% of GT), despite high pixel-level diversity. Prior Wasserstein and pairwise-L2 metrics missed this.
 - **Outcome:** MM-exp21 at epoch 75 identified as the real diversity peak (54% of GT). Paper-level reframing: MM is a genuine 2.8× improvement over CD, not a lateral move.
 
+## [BUG] MultistepCDLoss hardcoded 1-channel sample shape
+- `sample_moment_loss` created `torch.randn(B, 1, 128, 128)` regardless of model channels
+- Broke NS MM training immediately — UNet expected 2 channels
+- Fix (commit 0b67c65): added `sample_shape` kwarg to `MultistepCDLoss`, `train_cm.py` passes `tuple(config.unet.dim)`
+- **Outcome:** NS MM jobs run; Darcy MM unaffected (default still `(1, 128, 128)`)
+
+## [BUG] Wandb projects hardcoded as `darcy-*` in all train scripts
+- All 5 train scripts (`train_vp_diffusion`, `train_cm`, `train_rectified_flow`, `train_mean_flow`, `train_pd`) hardcoded `project="darcy-..."`
+- NS training runs launched 2026-04-21/22 ended up in Darcy wandb projects
+- Fix (commit 2cc2d47): derive project from `config.dataloader.loader_type`, with `wandb_project` config-level override available
+- **Outcome:** NS runs from MM-mm21 onward route to `ns-*` projects. First-wave NS runs (teacher/RF/MFM) left in Darcy projects to avoid losing training continuity — documented in `KNOWLEDGE.md`
+
+## [INFRA] NS dataset pipeline
+- Downloaded 2 PDEBench files (`ns_incom_inhom_2d_512-0/1.h5`, ~9 GB each)
+- `scripts/preprocess_ns.py` flattens time dim, downsamples 512→128 via 4×4 avg pool, subsamples to fixed count (seed-locked)
+- Final dataset: ~8000 frames at (2, 128, 128), saved as `data/ns_incom_128_merged.h5`
+- `config/ns_teacher.yaml` set to 7000 train / 1000 test split (matches Darcy test count)
+- **Outcome:** NS data ready for the same pipeline as Darcy
+
+## [INFRA] NS teacher + downstream training kicked off
+- Teacher (600 ep), RF round 1 (800 ep), Reflow (400 ep), MFM (1000 ep), CD-16 (1000 ep) chained where appropriate
+- MM-mm21 (mu=4, var=200) and MM-mm22 (mu=16, var=150) launched against teacher checkpoint_75 + precomputed moments
+- All 5 NS jobs running concurrently across GPUs 0/1/3/4/5
+- **Outcome:** Full NS sweep underway
+
 ## [BUG] RectifiedFlowSampler step-count bug
 - Discovered and fixed: `RectifiedFlowSampler.sample(z, num_steps=N)` takes `num_steps`, but `evaluate_paper.py` and `generate_presentation.py` were passing `t_span_kwargs` (MeanSampler's interface). Silently defaulted to 100 steps.
 - All prior RF/Reflow numbers and figures were at 100 steps regardless of requested count.
