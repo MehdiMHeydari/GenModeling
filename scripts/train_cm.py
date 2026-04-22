@@ -137,6 +137,7 @@ def main(config_path):
         teacher_moments_path=config.cd.get("teacher_moments_path", None),
         moment_every=config.cd.get("moment_every", 50),
         moment_batch_size=config.cd.get("moment_batch_size", 32),
+        sample_shape=tuple(config.unet.dim),
     )
 
     # --- Optimizer ---

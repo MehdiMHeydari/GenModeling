@@ -74,7 +74,7 @@ class MultistepCDLoss(Loss):
                  x_var_frac=0.75, huber_epsilon=1e-4, schedule_s=0.008,
                  moment_weight_mu=0.0, moment_weight_var=0.0,
                  teacher_moments_path=None, moment_every=50,
-                 moment_batch_size=32):
+                 moment_batch_size=32, sample_shape=(1, 128, 128)):
         super().__init__(class_conditional)
         self.teacher = teacher_model
         self.student_steps = student_steps
@@ -85,6 +85,7 @@ class MultistepCDLoss(Loss):
         self.moment_weight_var = moment_weight_var
         self.moment_every = moment_every
         self.moment_batch_size = moment_batch_size
+        self.sample_shape = tuple(sample_shape)
         self._iteration = 0
         self.last_moment_mu = 0.0
         self.last_moment_var = 0.0
@@ -143,7 +144,7 @@ class MultistepCDLoss(Loss):
 
         T = self.student_steps
         schedule_s = self.schedule_s
-        z = torch.randn(self.moment_batch_size, 1, 128, 128, device=device)
+        z = torch.randn(self.moment_batch_size, *self.sample_shape, device=device)
 
         def _step_fn(z_in, t_val, s_val):
             x_hat = model.predict_x(z_in, t_val, use_ema=False)
