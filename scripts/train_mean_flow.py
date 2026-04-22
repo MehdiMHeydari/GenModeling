@@ -109,8 +109,10 @@ def main(config_path):
     optim = Adam(model.network.parameters(), lr=config.optimizer.lr)
 
     # --- Weights & Biases ---
+    loader_type = config.dataloader.get("loader_type", "darcy")
+    wandb_project = config.get("wandb_project", f"{loader_type}-mean-flow")
     wandb.init(
-        project="darcy-mean-flow",
+        project=wandb_project,
         name=f"mfm_exp{config.exp_num}",
         config=OmegaConf.to_container(config, resolve=True),
     )

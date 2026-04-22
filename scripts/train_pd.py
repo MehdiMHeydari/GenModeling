@@ -120,8 +120,10 @@ def main(config_path):
           f"({num_rounds} rounds, {epochs_per_round} epochs each)")
 
     # --- Weights & Biases ---
+    loader_type = config.dataloader.get("loader_type", "darcy")
+    wandb_project = config.get("wandb_project", f"{loader_type}-pd")
     wandb.init(
-        project="darcy-pd",
+        project=wandb_project,
         name=f"pd_exp{config.exp_num}",
         config=OmegaConf.to_container(config, resolve=True),
     )
