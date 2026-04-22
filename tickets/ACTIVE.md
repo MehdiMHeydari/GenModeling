@@ -1,5 +1,10 @@
 # Active Work
 
+> ⚠️ **wandb mixing note**: NS teacher, RF, MFM runs launched 2026-04-21/22
+> are logged in the `darcy-*` wandb projects (hardcoded project bug fixed
+> in commit 2cc2d47 but not restarted). See KNOWLEDGE.md.
+> MM-mm21 and later NS runs route to `ns-*` correctly.
+
 ## In flight — overnight NS training (launched 2026-04-21)
 
 ### [INFRA] GPU 3: NS teacher (600 ep) → CD-16 (1000 ep) chain

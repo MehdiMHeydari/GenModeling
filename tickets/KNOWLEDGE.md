@@ -21,6 +21,29 @@ Non-obvious findings we've learned. Check here before changing a default or re-i
 
 - CD training uses its own `N_teacher` annealing schedule (64 → 1280 over 100k iters). Teacher is called single-pass (`predict_x`) per training step, **not** multi-step DDIM sampling. So CD training is unaffected by `DDIM_STEPS` constants in sampling scripts.
 
+## Wandb project mixing (NS runs launched 2026-04-21/22 before commit 2cc2d47)
+
+**The first wave of NS training runs is logged into the Darcy wandb projects**,
+not the NS ones. This happened because all train scripts hardcoded `darcy-*`
+as the wandb project. Commit 2cc2d47 fixed this to derive from
+`config.dataloader.loader_type`, but the already-running jobs were not
+restarted to preserve training progress.
+
+Affected runs (all in darcy-* projects despite being NS):
+- NS teacher (exp_1) — in `darcy-teacher`
+- NS RF round 1 (exp_1) — in `darcy-rectified-flow`
+- NS Reflow round 2 (exp_1, will appear once triggered) — in `darcy-rectified-flow`
+- NS MFM (exp_1) — in `darcy-mean-flow`
+
+**How to identify them in wandb**: run timestamps around 2026-04-21/22 and
+config contents will show `dataloader.loader_type: "ns"` and
+`dataloader.datapath: "data/ns_incom_128_merged.h5"`.
+
+Runs launched after commit 2cc2d47 (MM-mm21, MM-mm22, future NS re-runs) go
+to the correct `ns-*` projects. When doing paper writeup, pull NS training
+curves from BOTH the darcy-* projects (for the first-wave runs) and the
+ns-* projects (for MM and later runs).
+
 ## Known failure modes
 
 - **CD 4-step mode-collapses** — main motivation for the moment-matching objective.
