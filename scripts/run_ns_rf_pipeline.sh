@@ -28,13 +28,17 @@ echo "============================================"
 echo "GPU: ${CUDA_VISIBLE_DEVICES:-default}"
 echo ""
 
-# --- Step 1: Round 1 training ---
-echo "[1/3] Round 1 (800 epochs)..."
-python scripts/train_rectified_flow.py "$ROUND1_CONFIG"
+# --- Step 1: Round 1 training (skip if final checkpoint already exists) ---
+if [ -f "$ROUND1_FINAL_CKPT" ]; then
+    echo "[1/3] Round 1 SKIPPED — $ROUND1_FINAL_CKPT already exists."
+else
+    echo "[1/3] Round 1 (800 epochs)..."
+    python scripts/train_rectified_flow.py "$ROUND1_CONFIG"
 
-if [ ! -f "$ROUND1_FINAL_CKPT" ]; then
-    echo "ERROR: expected $ROUND1_FINAL_CKPT after round 1. Aborting."
-    exit 1
+    if [ ! -f "$ROUND1_FINAL_CKPT" ]; then
+        echo "ERROR: expected $ROUND1_FINAL_CKPT after round 1. Aborting."
+        exit 1
+    fi
 fi
 
 # --- Step 2: Generate reflow pairs ---
