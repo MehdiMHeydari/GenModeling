@@ -88,6 +88,24 @@
 - All 5 NS jobs running concurrently across GPUs 0/1/3/4/5
 - **Outcome:** Full NS sweep underway
 
+## [INFRA] NS Teacher fully trained (2026-04-22)
+- 600 epochs in ~14 hours on GPU 3 (A100)
+- Final checkpoint: `ns_teacher/exp_1/saved_state/checkpoint_599.pt`
+- Teacher moments precomputed from checkpoint_75 (early — should consider recomputing from final ckpt if MM results look bad)
+- **Outcome:** Teacher available as DDIM baseline for NS eval; CD-16 chain auto-started after
+
+## [INFRA] NS RF round 1 fully trained (2026-04-22)
+- 800 epochs in ~21 hours on GPU 0 (A100)
+- Final checkpoint: `ns_rectified_flow/exp_1/saved_state/checkpoint_799.pt`
+- **Outcome:** RF baseline available; reflow blocked on bug fix (now resolved)
+
+## [BUG] generate_reflow_pairs hardcoded 1-channel UNet
+- Same bug class as MultistepCDLoss — built UNet with 1-channel default
+- Crashed NS reflow pair generation immediately after RF round 1 finished
+- Fix (commit e7eaa3f): added `--channels` CLI flag (default 1, NS uses 2);
+  updated `run_ns_rf_pipeline.sh` to pass `--channels 2`
+- **Outcome:** NS reflow can now run after restarting from RF round 1's checkpoint
+
 ## [BUG] RectifiedFlowSampler step-count bug
 - Discovered and fixed: `RectifiedFlowSampler.sample(z, num_steps=N)` takes `num_steps`, but `evaluate_paper.py` and `generate_presentation.py` were passing `t_span_kwargs` (MeanSampler's interface). Silently defaulted to 100 steps.
 - All prior RF/Reflow numbers and figures were at 100 steps regardless of requested count.
