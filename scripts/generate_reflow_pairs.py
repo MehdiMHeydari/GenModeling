@@ -21,21 +21,20 @@ from src.models.flow_models import RectifiedFlowMatching
 from src.inference.samplers import RectifiedFlowSampler
 
 
-DATA_SHAPE = (1, 128, 128)
-
-UNET_CFG = dict(
-    dim=list(DATA_SHAPE),
-    channel_mult="1, 2, 4, 4",
-    num_channels=64,
-    num_res_blocks=2,
-    num_head_channels=32,
-    attention_resolutions="32",
-    dropout=0.0,
-    use_new_attention_order=True,
-    use_scale_shift_norm=True,
-    class_cond=False,
-    num_classes=None,
-)
+def make_unet_cfg(channels):
+    return dict(
+        dim=[channels, 128, 128],
+        channel_mult="1, 2, 4, 4",
+        num_channels=64,
+        num_res_blocks=2,
+        num_head_channels=32,
+        attention_resolutions="32",
+        dropout=0.0,
+        use_new_attention_order=True,
+        use_scale_shift_norm=True,
+        class_cond=False,
+        num_classes=None,
+    )
 
 
 def main():
@@ -50,19 +49,22 @@ def main():
     parser.add_argument("--save_path", type=str, default="darcy_rectified_flow/reflow_pairs.pt")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--gpu", type=int, default=0)
+    parser.add_argument("--channels", type=int, default=1,
+                        help="Number of input channels (1 for Darcy, 2 for NS)")
     args = parser.parse_args()
 
     device = th.device(f"cuda:{args.gpu}" if th.cuda.is_available() else "cpu")
     th.manual_seed(args.seed)
+    data_shape = (args.channels, 128, 128)
 
     # --- Build and load model ---
-    network = UNetModel(**UNET_CFG)
+    network = UNetModel(**make_unet_cfg(args.channels))
     model = RectifiedFlowMatching(network=network, add_heavy_noise=False, infer=True)
 
     state = th.load(args.checkpoint, map_location="cpu", weights_only=True)
     model.network.load_state_dict(state["model_state_dict"])
     model.to(device).eval()
-    print(f"Loaded: {args.checkpoint}")
+    print(f"Loaded: {args.checkpoint}  (channels={args.channels})")
 
     # --- Generate pairs ---
     sampler = RectifiedFlowSampler(model)
@@ -77,7 +79,7 @@ def main():
 
     for i in range(rounds):
         n = min(batch_size, n_total - i * batch_size)
-        z = th.randn(n, *DATA_SHAPE, device=device)
+        z = th.randn(n, *data_shape, device=device)
         x = sampler.sample(z, num_steps=args.ode_steps)
 
         all_z.append(z.cpu())

@@ -45,6 +45,7 @@ python scripts/generate_reflow_pairs.py \
     --n_pairs 7000 \
     --ode_steps 100 \
     --save_path "$REFLOW_PAIRS_PATH" \
+    --channels 2 \
     --gpu 0
 
 # --- Step 3: Reflow (round 2) training ---
