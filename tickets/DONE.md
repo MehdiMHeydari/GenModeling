@@ -111,3 +111,24 @@
 - All prior RF/Reflow numbers and figures were at 100 steps regardless of requested count.
 - Fix: commit 67aed0e. Re-ran RF + Reflow with correct step counts.
 - **Outcome:** True step-count sweep for RF now shows quality is best at ~5 steps. Documented in `KNOWLEDGE.md`.
+
+## [TEACHER] NS teacher sampling diagnostic (2026-04-24)
+- Three-phase sweep in `diagnostics/ns_teacher_v{1,2,3}/`:
+  - v1: ckpts {200, 400, 599} × steps {75, 250} × samplers {DDIM, Heun}
+  - v2: intermediate ckpts {50, 75, 100, 150, 200} × DDIM 75
+  - v3: full spread {50, 75, 100, 150, 200, 599} × DDIM 75, with random GT sampling + per-channel (Vx, Vy) histograms
+- Findings:
+  - **NS training is wildly non-monotone**: WD curve is 50=0.011 → 75=0.014 → 100=0.111 → 150=0.051 → 200=0.033 → 400=0.087 → 599=0.041. Looks like an LR/EMA interaction; good enough for paper but can't trust latest checkpoints without checking.
+  - **More DDIM steps doesn't help** on NS (75 ≈ 250 within 3%) — opposite of Darcy where 250 >> 75.
+  - **Heun doesn't help** (matches Darcy finding).
+  - |v| magnitude histograms overstate error because magnitude of a noisy 2D vector is biased upward near 0; per-channel (Vx, Vy) histograms look much tighter.
+  - **Canonical NS teacher: `checkpoint_75.pt` + DDIM 75**. Locked in `src/eval/constants.py` NS block.
+- **Outcome:** MM moments already precomputed from ckpt 75 → MM-mm21/22 do not need to restart.
+
+## [EVAL] NS eval pipeline (2026-04-24)
+- `src/eval/constants.py` parameterized by dataset via `_DATASETS` dict + `get_dataset(name)` helper; existing Darcy module constants preserved for back-compat.
+- `scripts/lock_ns_test_indices.py` writes 1000 locked NS test indices.
+- `scripts/evaluate_paper.py` now takes `--dataset ns|darcy` (or reads `dataset:` at the top of the config); UNet config built per-call from `data_shape`; distribution-shape metrics (Wasserstein, skew, kurt) and `structural_diversity` all reduce through `to_scalar_field` which is first-channel for Darcy and `sqrt(Vx² + Vy²)` for NS.
+- CSV gained a `dataset` column — back-compat guard errors out if the output path points at an old-header CSV rather than silently appending mismatched rows.
+- `config/ns_paper_eval.yaml` enumerates 14 evaluations covering teacher + RF ×3 ckpts + Reflow ×2 + MFM ×3 + CD-16 ×3 + MM variants. Spreads early/mid/late per method because training is non-monotone.
+- **Outcome:** Unified pipeline — same script runs Darcy and NS. Ready to run NS eval once `ns_test_indices.npy` is generated on the GPU server.

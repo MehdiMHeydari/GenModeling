@@ -41,8 +41,7 @@ import yaml
 from scipy.stats import wasserstein_distance
 
 from src.eval.constants import (
-    DATA_PATH, DATA_SHAPE, N_TEST_SAMPLES, PAPER_SEEDS, SCHEDULE_S, STATS_DIR,
-    load_test_indices,
+    N_TEST_SAMPLES, PAPER_SEEDS, SCHEDULE_S, get_dataset, load_test_indices,
 )
 from src.models.networks.unet.unet import UNetModelWrapper as UNetModel
 from src.models.vp_diffusion import VPDiffusionModel
@@ -52,19 +51,20 @@ from src.inference.samplers import MultistepCMSampler, MeanSampler, RectifiedFlo
 from src.models.diffusion_utils import ddim_step
 
 
-UNET_CFG = dict(
-    dim=list(DATA_SHAPE),
-    channel_mult="1, 2, 4, 4",
-    num_channels=64,
-    num_res_blocks=2,
-    num_head_channels=32,
-    attention_resolutions="32",
-    dropout=0.0,
-    use_new_attention_order=True,
-    use_scale_shift_norm=True,
-    class_cond=False,
-    num_classes=None,
-)
+def make_unet_cfg(data_shape):
+    return dict(
+        dim=list(data_shape),
+        channel_mult="1, 2, 4, 4",
+        num_channels=64,
+        num_res_blocks=2,
+        num_head_channels=32,
+        attention_resolutions="32",
+        dropout=0.0,
+        use_new_attention_order=True,
+        use_scale_shift_norm=True,
+        class_cond=False,
+        num_classes=None,
+    )
 
 
 def denormalize(samples, data_min, data_max):
@@ -93,8 +93,8 @@ def make_noise(seed, n_samples, shape):
 # ---------------------------------------------------------------------------
 
 @th.no_grad()
-def sample_teacher(ckpt, n_steps, noise, device, batch_size=64):
-    network = UNetModel(**UNET_CFG)
+def sample_teacher(ckpt, n_steps, noise, device, unet_cfg, batch_size=64):
+    network = UNetModel(**unet_cfg)
     model = VPDiffusionModel(network=network, schedule_s=SCHEDULE_S, infer=True)
     state = th.load(ckpt, map_location="cpu", weights_only=True)
     model.network.load_state_dict(state["model_state_dict"])
@@ -117,8 +117,8 @@ def sample_teacher(ckpt, n_steps, noise, device, batch_size=64):
 
 
 @th.no_grad()
-def sample_cd(ckpt, student_steps, noise, device, batch_size=64):
-    network = UNetModel(**UNET_CFG)
+def sample_cd(ckpt, student_steps, noise, device, unet_cfg, batch_size=64):
+    network = UNetModel(**unet_cfg)
     model = MultistepConsistencyModel(
         network=network, student_steps=student_steps,
         schedule_s=SCHEDULE_S, infer=True,
@@ -140,8 +140,8 @@ def sample_cd(ckpt, student_steps, noise, device, batch_size=64):
 
 
 @th.no_grad()
-def sample_pd(ckpt, n_steps, noise, device, batch_size=64):
-    network = UNetModel(**UNET_CFG)
+def sample_pd(ckpt, n_steps, noise, device, unet_cfg, batch_size=64):
+    network = UNetModel(**unet_cfg)
     model = VPDiffusionModel(network=network, schedule_s=SCHEDULE_S, infer=True)
     state = th.load(ckpt, map_location="cpu", weights_only=True)
     model.network.load_state_dict(state["model_state_dict"])
@@ -164,8 +164,8 @@ def sample_pd(ckpt, n_steps, noise, device, batch_size=64):
 
 
 @th.no_grad()
-def sample_rf(ckpt, n_steps, noise, device, batch_size=64):
-    network = UNetModel(**UNET_CFG)
+def sample_rf(ckpt, n_steps, noise, device, unet_cfg, batch_size=64):
+    network = UNetModel(**unet_cfg)
     model = RectifiedFlowMatching(network=network, add_heavy_noise=False)
     state = th.load(ckpt, map_location="cpu", weights_only=True)
     model.network.load_state_dict(state["model_state_dict"])
@@ -184,8 +184,8 @@ def sample_rf(ckpt, n_steps, noise, device, batch_size=64):
 
 
 @th.no_grad()
-def sample_mfm(ckpt, n_steps, noise, device, batch_size=64):
-    cfg = dict(UNET_CFG)
+def sample_mfm(ckpt, n_steps, noise, device, unet_cfg, batch_size=64):
+    cfg = dict(unet_cfg)
     cfg["use_future_time_emb"] = True
     network = UNetModel(**cfg)
     model = MeanFlowMatching(network=network)
@@ -215,6 +215,15 @@ KIND_SAMPLERS = {
 }
 
 
+def to_scalar_field(samples):
+    """Reduce (N, C, H, W) to (N, H, W) for distribution/structural metrics.
+    1-channel (Darcy): first channel directly. 2+ channels (NS): L2 magnitude
+    across channels — matches what the paper visualizes for NS (|v|)."""
+    if samples.shape[1] == 1:
+        return samples[:, 0]
+    return np.sqrt((samples ** 2).sum(axis=1))
+
+
 def pairwise_l2_diversity(samples, cap=256):
     """Mean pairwise L2 distance on flattened pixels. Captures any variation
     (including same-shape-different-intensity, so can overstate diversity)."""
@@ -231,16 +240,17 @@ def pairwise_l2_diversity(samples, cap=256):
 
 
 def structural_diversity(samples, cap=256):
-    """Mean pairwise L2 of per-sample center-of-mass. Captures spatial
-    structural variation (where is the mass); catches mode collapse that
-    pairwise_l2 misses."""
+    """Mean pairwise L2 of per-sample center-of-mass on the scalar field.
+    Captures spatial structural variation (where is the mass); catches mode
+    collapse that pairwise_l2 misses. For NS this runs on |v|."""
     if samples.shape[0] > cap:
         samples = samples[:cap]
-    n, _, h, w = samples.shape
+    field = to_scalar_field(samples)  # (N, H, W)
+    n, h, w = field.shape
     y_coords, x_coords = np.meshgrid(np.arange(h), np.arange(w), indexing="ij")
     coms = np.zeros((n, 2))
     for i in range(n):
-        arr = samples[i, 0]
+        arr = field[i]
         shifted = arr - arr.min() + 1e-8
         total = shifted.sum()
         coms[i, 0] = (x_coords * shifted).sum() / total
@@ -254,9 +264,12 @@ def structural_diversity(samples, cap=256):
 
 
 def compute_metrics(gen_denorm, real_denorm):
-    gen_flat = gen_denorm.flatten()
-    real_flat = real_denorm.flatten()
-    cap = min(len(gen_flat), len(real_flat), 100_000)
+    """Pixel MSE and moments on raw channels; distribution-shape metrics
+    (Wasserstein, skew, kurtosis) on the scalar field to handle multi-channel
+    data uniformly."""
+    gen_field = to_scalar_field(gen_denorm).flatten()
+    real_field = to_scalar_field(real_denorm).flatten()
+    cap = min(len(gen_field), len(real_field), 100_000)
 
     def skew(x):
         m = x.mean(); s = x.std()
@@ -268,21 +281,22 @@ def compute_metrics(gen_denorm, real_denorm):
 
     return {
         "pixel_mse": float(((gen_denorm - real_denorm) ** 2).mean()),
-        "wasserstein": float(wasserstein_distance(gen_flat[:cap], real_flat[:cap])),
+        "wasserstein": float(wasserstein_distance(gen_field[:cap], real_field[:cap])),
         "mean_err": abs(float(gen_denorm.mean()) - float(real_denorm.mean())),
         "std_err": abs(float(gen_denorm.std()) - float(real_denorm.std())),
-        "skew_err": abs(skew(gen_flat[:cap]) - skew(real_flat[:cap])),
-        "kurt_err": abs(kurt(gen_flat[:cap]) - kurt(real_flat[:cap])),
+        "skew_err": abs(skew(gen_field[:cap]) - skew(real_field[:cap])),
+        "kurt_err": abs(kurt(gen_field[:cap]) - kurt(real_field[:cap])),
         "pix_diversity": pairwise_l2_diversity(gen_denorm),
         "struct_diversity": structural_diversity(gen_denorm),
     }
 
 
-def load_real_data():
-    data_min = np.load(os.path.join(STATS_DIR, "data_min.npy"))
-    data_max = np.load(os.path.join(STATS_DIR, "data_max.npy"))
-    test_idx = load_test_indices()[:N_TEST_SAMPLES]
-    with h5py.File(DATA_PATH, "r") as f:
+def load_real_data(dataset):
+    ds = get_dataset(dataset)
+    data_min = np.load(os.path.join(ds["stats_dir"], "data_min.npy"))
+    data_max = np.load(os.path.join(ds["stats_dir"], "data_max.npy"))
+    test_idx = load_test_indices(dataset)[:N_TEST_SAMPLES]
+    with h5py.File(ds["data_path"], "r") as f:
         data = f["tensor"][:]
     if data.ndim == 3:
         data = data[:, None]
@@ -307,6 +321,10 @@ def main():
     p.add_argument("--gpu", type=int, default=0)
     p.add_argument("--config", type=str, default="config/paper_eval.yaml")
     p.add_argument("--output", type=str, default="results/eval_all.csv")
+    p.add_argument("--dataset", type=str, default=None,
+                   choices=["darcy", "ns"],
+                   help="Override dataset (else read from config['dataset'], "
+                        "else default 'darcy').")
     p.add_argument("--only", type=str, default=None,
                    help="Comma-separated method names to run (subset of config)")
     p.add_argument("--seeds", type=int, nargs="+", default=None,
@@ -320,6 +338,12 @@ def main():
     with open(args.config) as f:
         cfg = yaml.safe_load(f)
     methods = cfg["methods"]
+    dataset = args.dataset or cfg.get("dataset", "darcy")
+    ds = get_dataset(dataset)
+    data_shape = ds["data_shape"]
+    unet_cfg = make_unet_cfg(data_shape)
+    print(f"Dataset: {dataset}  data_shape={data_shape}")
+
     if args.only:
         wanted = {s.strip() for s in args.only.split(",")}
         methods = [m for m in methods if m["name"] in wanted]
@@ -327,18 +351,28 @@ def main():
             raise SystemExit(f"No methods matched --only={args.only}")
 
     seeds = args.seeds if args.seeds is not None else list(PAPER_SEEDS)
-    real_denorm, data_min, data_max = load_real_data()
+    real_denorm, data_min, data_max = load_real_data(dataset)
 
+    header = [
+        "dataset", "method", "kind", "ckpt", "step_count", "seed", "nfe",
+        "pixel_mse", "wasserstein", "mean_err", "std_err",
+        "skew_err", "kurt_err", "pix_diversity", "struct_diversity",
+        "wall_clock_s", "notes",
+    ]
     new_file = not os.path.exists(args.output)
+    if not new_file:
+        with open(args.output) as f:
+            existing_header = next(csv.reader(f), [])
+        if existing_header != header:
+            raise SystemExit(
+                f"{args.output} exists with a different header (len "
+                f"{len(existing_header)} vs {len(header)}). Delete or move it, "
+                f"or pass --output with a fresh path."
+            )
     out_f = open(args.output, "a", newline="")
     writer = csv.writer(out_f)
     if new_file:
-        writer.writerow([
-            "method", "kind", "ckpt", "step_count", "seed", "nfe",
-            "pixel_mse", "wasserstein", "mean_err", "std_err",
-            "skew_err", "kurt_err", "pix_diversity", "struct_diversity",
-            "wall_clock_s", "notes",
-        ])
+        writer.writerow(header)
 
     for entry in methods:
         kind = entry["kind"]
@@ -356,21 +390,21 @@ def main():
 
         for n_steps in step_counts:
             for seed in seeds:
-                noise = make_noise(seed, N_TEST_SAMPLES, DATA_SHAPE)
+                noise = make_noise(seed, N_TEST_SAMPLES, data_shape)
                 t0 = time.time()
                 if kind == "cd":
                     samples, nfe = sampler(
-                        ckpt, entry["student_steps"], noise, device,
+                        ckpt, entry["student_steps"], noise, device, unet_cfg,
                     )
                 else:
-                    samples, nfe = sampler(ckpt, n_steps, noise, device)
+                    samples, nfe = sampler(ckpt, n_steps, noise, device, unet_cfg)
                 wall = time.time() - t0
 
                 gen_denorm = denormalize(samples, data_min, data_max)
                 m = compute_metrics(gen_denorm, real_denorm)
 
                 writer.writerow([
-                    entry["name"], kind, ckpt, n_steps, seed, nfe,
+                    dataset, entry["name"], kind, ckpt, n_steps, seed, nfe,
                     m["pixel_mse"], m["wasserstein"], m["mean_err"],
                     m["std_err"], m["skew_err"], m["kurt_err"],
                     m["pix_diversity"], m["struct_diversity"],

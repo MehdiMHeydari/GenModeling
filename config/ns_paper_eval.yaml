@@ -1,0 +1,102 @@
+# NS paper-facing evaluation config.
+#
+# Parallels config/paper_eval.yaml for the 2-channel Navier-Stokes sweep.
+# See that file's header comments for field meanings.
+#
+# Canonical NS teacher = ckpt 75 + DDIM 75 (see tickets/KNOWLEDGE.md). Teacher
+# training is non-monotone, so we evaluate a SPREAD of checkpoints per method
+# rather than trusting the latest — early, mid, late — to catch the same
+# pattern in downstream methods.
+#
+# Still-training snapshot (as of 2026-04-24):
+#   Reflow  — 233/400 epochs
+#   MFM     — 375/1000 epochs
+#   MM-21   — 75/300 epochs (slow — let it hit the diversity-peak analog)
+#   MM-22   — 125/300 epochs
+# Re-run this config after each training job finishes to pick up later
+# checkpoints.
+
+dataset: ns
+
+methods:
+  # --- Teacher baseline (canonical ckpt 75, DDIM 75) ---
+  - name: "NS-Teacher-ckpt75"
+    kind: "teacher"
+    ckpt: "ns_teacher/exp_1/saved_state/checkpoint_75.pt"
+    step_counts: [75]
+    notes: "canonical NS teacher (WD 0.014 in diagnostic v3)"
+
+  # --- Rectified Flow round 1 spread (done, 800 epochs) ---
+  - name: "NS-RF-ckpt100"
+    kind: "rf"
+    ckpt: "ns_rectified_flow/exp_1/saved_state/checkpoint_100.pt"
+    step_counts: [1, 2, 5, 10]
+  - name: "NS-RF-ckpt400"
+    kind: "rf"
+    ckpt: "ns_rectified_flow/exp_1/saved_state/checkpoint_400.pt"
+    step_counts: [1, 2, 5, 10]
+  - name: "NS-RF-ckpt799"
+    kind: "rf"
+    ckpt: "ns_rectified_flow/exp_1/saved_state/checkpoint_799.pt"
+    step_counts: [1, 2, 5, 10]
+
+  # --- Reflow round 2 (still training — add final once complete) ---
+  - name: "NS-Reflow-ckpt100"
+    kind: "rf"
+    ckpt: "ns_rectified_flow_reflow/exp_1/saved_state/checkpoint_100.pt"
+    step_counts: [1, 2, 5, 10]
+  - name: "NS-Reflow-ckpt200"
+    kind: "rf"
+    ckpt: "ns_rectified_flow_reflow/exp_1/saved_state/checkpoint_200.pt"
+    step_counts: [1, 2, 5, 10]
+
+  # --- Mean Flow Matching (still training — 375/1000) ---
+  - name: "NS-MFM-ckpt100"
+    kind: "mfm"
+    ckpt: "ns_mean_flow/exp_1/saved_state/checkpoint_100.pt"
+    step_counts: [2, 4, 8, 16]
+  - name: "NS-MFM-ckpt200"
+    kind: "mfm"
+    ckpt: "ns_mean_flow/exp_1/saved_state/checkpoint_200.pt"
+    step_counts: [2, 4, 8, 16]
+  - name: "NS-MFM-ckpt375"
+    kind: "mfm"
+    ckpt: "ns_mean_flow/exp_1/saved_state/checkpoint_375.pt"
+    step_counts: [2, 4, 8, 16]
+
+  # --- Baseline CD-16 student (done, 1000 epochs) ---
+  - name: "NS-CD16-ckpt100"
+    kind: "cd"
+    ckpt: "ns_student/exp_1/saved_state/checkpoint_100.pt"
+    student_steps: 16
+    step_counts: [16]
+  - name: "NS-CD16-ckpt500"
+    kind: "cd"
+    ckpt: "ns_student/exp_1/saved_state/checkpoint_500.pt"
+    student_steps: 16
+    step_counts: [16]
+  - name: "NS-CD16-ckpt999"
+    kind: "cd"
+    ckpt: "ns_student/exp_1/saved_state/checkpoint_999.pt"
+    student_steps: 16
+    step_counts: [16]
+
+  # --- Moment Matching variants (Darcy diversity-peak was ckpt 75) ---
+  - name: "NS-MM21-ckpt75"
+    kind: "cd"
+    ckpt: "ns_student/exp_21/saved_state/checkpoint_75.pt"
+    student_steps: 16
+    step_counts: [16]
+    notes: "mu=4, var=200 — Darcy-peak-analog (75)"
+  - name: "NS-MM22-ckpt75"
+    kind: "cd"
+    ckpt: "ns_student/exp_22/saved_state/checkpoint_75.pt"
+    student_steps: 16
+    step_counts: [16]
+    notes: "mu=16, var=150 — Darcy-peak-analog (75)"
+  - name: "NS-MM22-ckpt125"
+    kind: "cd"
+    ckpt: "ns_student/exp_22/saved_state/checkpoint_125.pt"
+    student_steps: 16
+    step_counts: [16]
+    notes: "mu=16, var=150 — later checkpoint for trend check"
