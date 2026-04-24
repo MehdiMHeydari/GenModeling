@@ -2,13 +2,21 @@
 
 Non-obvious findings we've learned. Check here before changing a default or re-investigating.
 
-## Teacher sampling
+## Teacher sampling (Darcy)
 
 - **Canonical teacher config**: `checkpoint_200.pt` + **DDIM 250 steps**. Do not change without re-running the diagnostic sweep.
 - **Raw weights beat EMA** (0.9999 decay) across all epochs for this teacher. All downstream uses `model_state_dict`, not `ema_state_dict`.
 - **Later checkpoints are worse**: ckpt 399 has 25% higher Wasserstein than ckpt 200 → raw weights drift/overfit past epoch 200.
 - **Heun sampler does NOT help**. Tested: Heun 250 steps (499 NFE) has worse Wasserstein than DDIM 250 steps. Don't waste NFE on higher-order samplers for this model.
 - **250 steps is the sweet spot**. 75 steps visibly undershoots the mode and has too-heavy right tail. 250 matches the histogram near-perfectly.
+
+## Teacher sampling (NS, 2026-04-24)
+
+- **Canonical teacher config**: `checkpoint_75.pt` + **DDIM 75 steps**. Best Wasserstein across the spread ckpts {50, 75, 100, 150, 200, 400, 599}.
+- **Training is wildly non-monotone**: 75→100 Wasserstein goes from 0.014 to 0.111 in one ckpt, recovers to 0.033 at 200, degrades again at 400 (0.087), partial recovery at 599 (0.041). Likely LR schedule × raw weights (no EMA) interaction. Consequence: **do not trust the latest NS checkpoint for any method blindly** — evaluate a spread.
+- **More DDIM steps does NOT help** on NS (75 matches 250 within 3%) — opposite of Darcy. Guess: NS velocity is smoother than Darcy porosity, denoising converges faster, extra steps just accumulate sampler noise.
+- **|v| histogram is pessimistic**. Magnitude of a noisy 2D vector is bounded below at 0 and thus biased upward in quiescent regions. Per-channel (Vx, Vy) histograms look much tighter than |v|. Report both.
+- **Teacher grain artifact**. Generated samples have visible high-frequency speckle that GT doesn't. Present at every checkpoint — property of this teacher family. Will be inherited by any student distilled from it.
 
 ## Training dependencies
 

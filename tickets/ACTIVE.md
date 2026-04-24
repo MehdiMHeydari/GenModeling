@@ -7,70 +7,61 @@
 
 ## In flight — NS training
 
-### [INFRA] GPU 3: CD-16 chain (epoch ~350/1000)
-- Tmux: `ns_teacher_cd`
-- Teacher 600 ep finished (`ns_teacher/exp_1/saved_state/checkpoint_599.pt`)
-- CD-16 student now training, on track at ~2.1 min/epoch
-- Output: `ns_student/exp_1/saved_state/`
+### [INFRA] GPU 0: NS Reflow round 2 (epoch ~233/400)
+- Tmux: `ns_reflow`
+- ~80s/iter, ETA ~3-4 hours from 2026-04-24 morning
+- Output: `ns_rectified_flow_reflow/exp_1/saved_state/`
 
-### [INFRA] GPU 4: NS MFM (epoch ~175/1000)
+### [INFRA] GPU 4: NS MFM (epoch ~375/1000)
 - Tmux: `ns_mfm`
-- Slow due to batch 8 + JVP (we dropped batch from 16 → 8 due to OOM)
+- Slow due to batch 8 + JVP (OOM at batch 16)
 - Output: `ns_mean_flow/exp_1/saved_state/`
 
 ### [INFRA] GPU 5: NS MM-mm21 (mu=4, var=200) — VERY SLOW
 - Tmux: `ns_moments`
-- Epoch 25/300 after ~12 hours (~28 min/epoch — 12× slower than vanilla CD)
-- Slow because `moment_every: 1` runs full sampling chain every iteration
-- Plan: let it cook overnight, evaluate checkpoint_75 (Darcy's diversity peak) tomorrow
+- Epoch 75/300, ETA ~4 days at ~28 min/epoch
+- Darcy diversity-peak analog = checkpoint 75, which is SAVED — eval-ready now
+- Decision (2026-04-24): let it continue past 75 for trend check, kill if no improvement at 100
 
-### [INFRA] GPU 1: NS MM-mm22 (mu=16, var=150) — slow same reason
+### [INFRA] GPU 1: NS MM-mm22 (mu=16, var=150)
 - Tmux: `ns_mm22`
-- Epoch 25/300 similar pace
-- Same plan as mm21
-
-## Broken — needs restart
-
-### [INFRA] NS Reflow round 2
-- `generate_reflow_pairs.py` was 1-channel hardcoded → crashed
-- Fixed in commit e7eaa3f (added `--channels` flag)
-- RF round 1 (epoch 799) is done, no need to retrain
-- Needs to: regenerate pairs with `--channels 2`, then train Reflow round 2
-- Suggested: GPU 0 (now free) — see "next steps" below
+- Epoch 125/300, same pace
+- Checkpoints 75 and 125 both available for eval
 
 ## Queued
 
-### [INFRA] Restart NS Reflow
-```
-cd ~/GenModeling-main && git pull
-tmux new -s ns_reflow
-conda activate gen-modeling
-CUDA_VISIBLE_DEVICES=0 ./scripts/run_ns_rf_pipeline.sh
-```
-Note: the pipeline script will see RF round 1 already done (checkpoint_799 exists) and... actually, it WILL retrain unless we modify it. Either modify the script to skip step 1, or run pair gen + round 2 manually.
-
-### [EVAL] Extend pipeline to 2-channel data
-- `src/eval/constants.py` has `DATA_SHAPE = (1, 128, 128)` hardcoded — parametrize
-- `evaluate_paper.py`, `generate_paper_figures.py` also assume 1 channel
-- `structural_diversity` metric: decide between per-channel-then-average OR magnitude field `sqrt(Vx² + Vy²)`
-- Required before running NS eval
-
-### [EVAL] Lock NS test indices
-- `data/ns_test_indices.npy` with 1000 indices from the 8000-frame pool
-- Variant of `scripts/lock_test_indices.py` for NS
-
 ### [EVAL] Run NS numeric eval
-- Create `config/ns_paper_eval.yaml` listing every NS method
-- Run `scripts/evaluate_paper.py --config config/ns_paper_eval.yaml`
-- Output: `results/ns_eval_all.csv`
+- All pipeline pieces landed 2026-04-24: `config/ns_paper_eval.yaml`,
+  `scripts/lock_ns_test_indices.py`, `src/eval/constants.py` (NS block),
+  `scripts/evaluate_paper.py --dataset ns`
+- Run order after latest git pull:
+  ```
+  python scripts/lock_ns_test_indices.py
+  python scripts/evaluate_paper.py --gpu <free> \
+      --config config/ns_paper_eval.yaml \
+      --output results/ns_eval_all.csv
+  ```
+- Checkpoint spread per method already in the config (see file comments)
+- Re-run after Reflow/MFM finish to pick up the final checkpoints
 
 ### [PAPER] Generate NS sample grid + histograms
 - Extend `scripts/generate_paper_figures.py` for 2-channel NS
+- Reuse velocity-magnitude reduction already implemented in
+  `diagnose_ns_teacher.py` / `evaluate_paper.py:to_scalar_field`
 
 ### [PAPER] Fill in `paper/main.tex` Methods section
 - Can be drafted now; doesn't depend on numbers
 
-### [DECISION] Restart NS MM on better teacher checkpoint?
-- Currently against teacher checkpoint_75
-- Now we have checkpoint_599 (final) — could re-precompute moments and restart MM
-- Decide based on what current MM checkpoints look like at evaluation
+### [DECISION] Restart NS MM on a different teacher checkpoint?
+- Moments precomputed from teacher checkpoint_75
+- **2026-04-24 diagnostic confirms ckpt 75 is the best NS teacher** (WD
+  0.014, beats ckpt 200's 0.033 and ckpt 599's 0.041). So no restart
+  needed — we got lucky.
+
+## Cleanup
+
+### [INFRA] Kill stale tmux sessions
+Safe to kill once confirmed finished: `eval_A`, `eval_B`, `eval_all`,
+`eval_mm`, `eval_rf`, `figures`, `ns_diag`, `ns_download`, `ns_download_1`,
+`ns_rf`, `ns_teacher`, `ns_teacher_cd` (CD-16 finished), `ns_teacher_diag2`,
+`ns_teacher_diag3`.
