@@ -153,6 +153,25 @@ def plot_hist(samples_denorm, gt_denorm, path, title):
     plt.close(fig)
 
 
+def plot_hist_per_channel(samples_denorm, gt_denorm, path, title):
+    """Side-by-side Vx and Vy histograms — avoids the |v| magnitude upward bias."""
+    fig, axes = plt.subplots(1, 2, figsize=(13, 4.5))
+    for ch, name in enumerate(["Vx", "Vy"]):
+        gt_ch = gt_denorm[:, ch].flatten()
+        gen_ch = samples_denorm[:, ch].flatten()
+        ax = axes[ch]
+        ax.hist(gt_ch, bins=80, density=True, alpha=0.35, label="Ground Truth", color="gray")
+        ax.hist(gen_ch, bins=80, density=True, histtype="step", linewidth=2, label="Generated")
+        ax.set_xlabel(name)
+        ax.set_ylabel("Density")
+        ax.set_title(name)
+        ax.legend()
+    fig.suptitle(title, fontsize=11)
+    fig.tight_layout()
+    fig.savefig(path, dpi=130, bbox_inches="tight")
+    plt.close(fig)
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--gpu", type=int, default=0)
@@ -175,7 +194,9 @@ def main():
     with h5py.File(DATA_PATH, "r") as f:
         data = f["tensor"][:]
     real_norm = 2.0 * (data - data_min) / (data_max - data_min) - 1.0
-    real_batch = real_norm[-args.n_samples:]
+    rng = np.random.RandomState(args.seed)
+    gt_indices = rng.choice(len(real_norm), size=args.n_samples, replace=False)
+    real_batch = real_norm[gt_indices]
     real_denorm = denormalize(real_batch, data_min, data_max)
 
     th.manual_seed(args.seed)
@@ -223,6 +244,8 @@ def main():
                           os.path.join(args.output_dir, f"{tag}_grid.png"), title)
                 plot_hist(gen, real_denorm,
                           os.path.join(args.output_dir, f"{tag}_hist.png"), title)
+                plot_hist_per_channel(gen, real_denorm,
+                                      os.path.join(args.output_dir, f"{tag}_hist_vxvy.png"), title)
 
         del teacher
         th.cuda.empty_cache()
