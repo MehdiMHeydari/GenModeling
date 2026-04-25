@@ -60,6 +60,38 @@
   3. RF trajectories were already straight enough that Reflow only added noise
 - Diagnostics: re-sample Reflow at multiple checkpoints to see if quality improves with training, or regenerate the reflow pairs and retrain
 
+## [INFRA] Fill missing NS baselines (paper-completeness)
+
+If we want NS to have parity with the Darcy benchmark, four jobs are missing:
+
+1. **NS CD-4 and CD-8 students.** Currently only CD-16 is trained on NS.
+   The Darcy paper table has CD-4/8/16 to show step-count degradation
+   (CD-4 mode-collapses, motivating moment matching). Without these the
+   "MM fixes CD" story is weaker on NS.
+   - ~33 hours each on one A100
+   - Configs: copy `config/ns_cm_cd.yaml` to `ns_cm_cd_4step.yaml` and
+     `ns_cm_cd_8step.yaml`, change `student_steps` and exp dir
+   - Launch in parallel on idle GPUs
+
+2. **NS Progressive Distillation.** Darcy has 6 PD rounds (128 → 2 steps);
+   NS has nothing. Lower priority than CD-4/8 but completes the table.
+
+3. **Retrain NS teacher with EMA.** The non-monotone WD curve (75 good →
+   100 catastrophic → 200 good → 400 catastrophic → 599 partial recovery)
+   is most likely an LR × raw-weights interaction. EMA should smooth it
+   out and probably gives a much stronger final teacher.
+   - ~14 hours
+   - Cost: MM moments are precomputed from the current teacher; switching
+     means restarting both MM-mm21 and MM-mm22 from scratch
+   - Worth doing if we have time before paper deadline; not strictly needed
+
+4. **NS MM with `moment_every: 8`.** Current MM is at `moment_every: 1`,
+   which runs the full sampling chain every iteration → 28 min/epoch
+   (12× vanilla CD). Bumping to 8 would be 8× faster and let us reach 300
+   epochs in a day. Useful only if we want to study post-checkpoint-75
+   trajectories — Darcy showed MM doesn't improve past ckpt 75, so probably
+   no need.
+
 ## [MFM] Investigate MFM step-count insensitivity
 - Evaluated numbers: WD ≈ 0.075 at 2, 4, 8, and 16 steps (flat)
 - Normally more steps → better. MFM defies this.
