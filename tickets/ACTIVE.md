@@ -5,63 +5,50 @@
 > MM-mm22, and any NS run launched after 2026-04-22 ~13:00 route to
 > `ns-*` correctly.
 
-## In flight — NS training
+## In flight — NS training (still running but eval already gives stable numbers)
 
-### [INFRA] GPU 0: NS Reflow round 2 (epoch ~233/400)
-- Tmux: `ns_reflow`
-- ~80s/iter, ETA ~3-4 hours from 2026-04-24 morning
-- Output: `ns_rectified_flow_reflow/exp_1/saved_state/`
-
-### [INFRA] GPU 4: NS MFM (epoch ~375/1000)
+### [INFRA] GPU 4: NS MFM (epoch ~725/1000)
 - Tmux: `ns_mfm`
-- Slow due to batch 8 + JVP (OOM at batch 16)
-- Output: `ns_mean_flow/exp_1/saved_state/`
+- Latest checkpoint included in current eval: `checkpoint_725.pt`
+- Still improving with training but slowly; stable trend in eval
 
-### [INFRA] GPU 5: NS MM-mm21 (mu=4, var=200) — VERY SLOW
+### [INFRA] GPU 5: NS MM-mm21 (epoch ~150/300)
 - Tmux: `ns_moments`
-- Epoch 75/300, ETA ~4 days at ~28 min/epoch
-- Darcy diversity-peak analog = checkpoint 75, which is SAVED — eval-ready now
-- Decision (2026-04-24): let it continue past 75 for trend check, kill if no improvement at 100
+- Latest in eval: ckpt 75 + ckpt 150
+- Numbers flat past ckpt 75 — could kill if GPU is needed elsewhere
 
-### [INFRA] GPU 1: NS MM-mm22 (mu=16, var=150)
+### [INFRA] GPU 1: NS MM-mm22 (epoch ~250/300)
 - Tmux: `ns_mm22`
-- Epoch 125/300, same pace
-- Checkpoints 75 and 125 both available for eval
+- Latest in eval: ckpt 75, 125, 250
+- Same as mm21 — flat past peak, could kill
 
 ## Queued
 
-### [EVAL] Run NS numeric eval
-- All pipeline pieces landed 2026-04-24: `config/ns_paper_eval.yaml`,
-  `scripts/lock_ns_test_indices.py`, `src/eval/constants.py` (NS block),
-  `scripts/evaluate_paper.py --dataset ns`
-- Run order after latest git pull:
-  ```
-  python scripts/lock_ns_test_indices.py
-  python scripts/evaluate_paper.py --gpu <free> \
-      --config config/ns_paper_eval.yaml \
-      --output results/ns_eval_all.csv
-  ```
-- Checkpoint spread per method already in the config (see file comments)
-- Re-run after Reflow/MFM finish to pick up the final checkpoints
-
 ### [PAPER] Generate NS sample grid + histograms
-- Extend `scripts/generate_paper_figures.py` for 2-channel NS
-- Reuse velocity-magnitude reduction already implemented in
-  `diagnose_ns_teacher.py` / `evaluate_paper.py:to_scalar_field`
+- `scripts/generate_ns_samples.py` (newly added 2026-04-27): pulls 8 samples per
+  method from `config/ns_paper_eval.yaml`, side-by-side GT vs Gen velocity-
+  magnitude grids
+- Run after eval: `python scripts/generate_ns_samples.py --gpu 2`
+- Visual sanity check that the Reflow @ 1 NFE win is real and not artifactual
 
-### [PAPER] Fill in `paper/main.tex` Methods section
-- Can be drafted now; doesn't depend on numbers
+### [PAPER] Fill in `paper/main.tex` with real numbers
+- Two-dataset story now lockable: Darcy (Table N) + NS (Table M)
+- Methods section can be drafted in parallel — doesn't depend on numbers
 
-### [DECISION] Restart NS MM on a different teacher checkpoint?
-- Moments precomputed from teacher checkpoint_75
-- **2026-04-24 diagnostic confirms ckpt 75 is the best NS teacher** (WD
-  0.014, beats ckpt 200's 0.033 and ckpt 599's 0.041). So no restart
-  needed — we got lucky.
+### [PAPER] Cross-dataset comparison plot
+- Pareto: WD vs NFE, faceted by dataset, one curve per method
+- Reflow line should sit at the bottom of the NS panel; RF line at the bottom of the Darcy panel
+- Drives home "best method is dataset-dependent" → why we needed both datasets
+
+### [DECISION] Should we kill MM jobs?
+- Numbers are flat. ~15 days of GPU-hours each remaining.
+- Kill saves time; cost is "we won't see if MM somehow improves at ckpt 300."
+- Darcy says it doesn't. Recommend: kill.
 
 ## Cleanup
 
 ### [INFRA] Kill stale tmux sessions
-Safe to kill once confirmed finished: `eval_A`, `eval_B`, `eval_all`,
-`eval_mm`, `eval_rf`, `figures`, `ns_diag`, `ns_download`, `ns_download_1`,
-`ns_rf`, `ns_teacher`, `ns_teacher_cd` (CD-16 finished), `ns_teacher_diag2`,
-`ns_teacher_diag3`.
+Safe to kill: `eval_A`, `eval_B`, `eval_all`, `eval_mm`, `eval_rf`, `figures`,
+`ns_diag`, `ns_download`, `ns_download_1`, `ns_rf`, `ns_teacher`,
+`ns_teacher_cd`, `ns_teacher_diag2`, `ns_teacher_diag3`, `ns_eval`, `ns_eval2`,
+`ns_reflow` (training finished at 399).
