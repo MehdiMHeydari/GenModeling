@@ -266,10 +266,23 @@ def structural_diversity(samples, cap=256):
 def compute_metrics(gen_denorm, real_denorm):
     """Pixel MSE and moments on raw channels; distribution-shape metrics
     (Wasserstein, skew, kurtosis) on the scalar field to handle multi-channel
-    data uniformly."""
+    data uniformly.
+
+    The cap is sampled uniformly at random rather than taking the first N
+    elements: a flattened (N, H, W) array is sample-major, so the first N
+    elements live in the first few frames. If those frames are temporally
+    correlated (NS, sorted test indices) the resulting subsample is biased
+    and Wasserstein blows up by ~10x. Fixed by random subsampling with a
+    locked seed so the metric is still reproducible.
+    """
     gen_field = to_scalar_field(gen_denorm).flatten()
     real_field = to_scalar_field(real_denorm).flatten()
     cap = min(len(gen_field), len(real_field), 100_000)
+    sub_rng = np.random.RandomState(0)
+    gen_idx = sub_rng.choice(len(gen_field), size=cap, replace=False)
+    real_idx = sub_rng.choice(len(real_field), size=cap, replace=False)
+    gen_sub = gen_field[gen_idx]
+    real_sub = real_field[real_idx]
 
     def skew(x):
         m = x.mean(); s = x.std()
@@ -281,11 +294,11 @@ def compute_metrics(gen_denorm, real_denorm):
 
     return {
         "pixel_mse": float(((gen_denorm - real_denorm) ** 2).mean()),
-        "wasserstein": float(wasserstein_distance(gen_field[:cap], real_field[:cap])),
+        "wasserstein": float(wasserstein_distance(gen_sub, real_sub)),
         "mean_err": abs(float(gen_denorm.mean()) - float(real_denorm.mean())),
         "std_err": abs(float(gen_denorm.std()) - float(real_denorm.std())),
-        "skew_err": abs(skew(gen_field[:cap]) - skew(real_field[:cap])),
-        "kurt_err": abs(kurt(gen_field[:cap]) - kurt(real_field[:cap])),
+        "skew_err": abs(skew(gen_sub) - skew(real_sub)),
+        "kurt_err": abs(kurt(gen_sub) - kurt(real_sub)),
         "pix_diversity": pairwise_l2_diversity(gen_denorm),
         "struct_diversity": structural_diversity(gen_denorm),
     }
