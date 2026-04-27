@@ -231,7 +231,12 @@ def main():
                 gen_mag_flat = velocity_magnitude(gen).flatten()
                 real_mag_flat = velocity_magnitude(real_denorm).flatten()
                 cap = min(len(gen_mag_flat), len(real_mag_flat), 50000)
-                wd = float(wasserstein_distance(gen_mag_flat[:cap], real_mag_flat[:cap]))
+                # Random subsample (not first N) to avoid bias when GT
+                # samples are temporally correlated. See evaluate_paper.py.
+                sub_rng = np.random.RandomState(0)
+                gen_sub = gen_mag_flat[sub_rng.choice(len(gen_mag_flat), size=cap, replace=False)]
+                real_sub = real_mag_flat[sub_rng.choice(len(real_mag_flat), size=cap, replace=False)]
+                wd = float(wasserstein_distance(gen_sub, real_sub))
                 mean_err = float(abs(gen.mean() - real_denorm.mean()))
                 std_err = float(abs(gen.std() - real_denorm.std()))
 
