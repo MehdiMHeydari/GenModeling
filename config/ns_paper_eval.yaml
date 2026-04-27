@@ -8,11 +8,13 @@
 # rather than trusting the latest — early, mid, late — to catch the same
 # pattern in downstream methods.
 #
-# Still-training snapshot (as of 2026-04-24):
-#   Reflow  — 233/400 epochs
-#   MFM     — 375/1000 epochs
-#   MM-21   — 75/300 epochs (slow — let it hit the diversity-peak analog)
-#   MM-22   — 125/300 epochs
+# Training snapshot (as of 2026-04-26):
+#   Teacher  — 599/600 (DONE)
+#   RF r1    — 799/800 (DONE)
+#   Reflow   — 399/400 (DONE)
+#   MFM      — 725/1000 (still training)
+#   MM-21    — 150/300 (slow, still training)
+#   MM-22    — 250/300 (slow, still training)
 # Re-run this config after each training job finishes to pick up later
 # checkpoints.
 
@@ -40,7 +42,7 @@ methods:
     ckpt: "ns_rectified_flow/exp_1/saved_state/checkpoint_799.pt"
     step_counts: [1, 2, 5, 10]
 
-  # --- Reflow round 2 (still training — add final once complete) ---
+  # --- Reflow round 2 (DONE at 399) ---
   - name: "NS-Reflow-ckpt100"
     kind: "rf"
     ckpt: "ns_rectified_flow_reflow/exp_1/saved_state/checkpoint_100.pt"
@@ -49,20 +51,26 @@ methods:
     kind: "rf"
     ckpt: "ns_rectified_flow_reflow/exp_1/saved_state/checkpoint_200.pt"
     step_counts: [1, 2, 5, 10]
+  - name: "NS-Reflow-ckpt399"
+    kind: "rf"
+    ckpt: "ns_rectified_flow_reflow/exp_1/saved_state/checkpoint_399.pt"
+    step_counts: [1, 2, 5, 10]
+    notes: "final reflow checkpoint"
 
-  # --- Mean Flow Matching (still training — 375/1000) ---
+  # --- Mean Flow Matching (still training — latest at 725) ---
   - name: "NS-MFM-ckpt100"
     kind: "mfm"
     ckpt: "ns_mean_flow/exp_1/saved_state/checkpoint_100.pt"
-    step_counts: [2, 4, 8, 16]
-  - name: "NS-MFM-ckpt200"
-    kind: "mfm"
-    ckpt: "ns_mean_flow/exp_1/saved_state/checkpoint_200.pt"
     step_counts: [2, 4, 8, 16]
   - name: "NS-MFM-ckpt375"
     kind: "mfm"
     ckpt: "ns_mean_flow/exp_1/saved_state/checkpoint_375.pt"
     step_counts: [2, 4, 8, 16]
+  - name: "NS-MFM-ckpt725"
+    kind: "mfm"
+    ckpt: "ns_mean_flow/exp_1/saved_state/checkpoint_725.pt"
+    step_counts: [2, 4, 8, 16]
+    notes: "latest available; MFM still training to 1000"
 
   # --- Baseline CD-16 student (done, 1000 epochs) ---
   - name: "NS-CD16-ckpt100"
@@ -88,6 +96,12 @@ methods:
     student_steps: 16
     step_counts: [16]
     notes: "mu=4, var=200 — Darcy-peak-analog (75)"
+  - name: "NS-MM21-ckpt150"
+    kind: "cd"
+    ckpt: "ns_student/exp_21/saved_state/checkpoint_150.pt"
+    student_steps: 16
+    step_counts: [16]
+    notes: "mu=4, var=200 — trend check past peak"
   - name: "NS-MM22-ckpt75"
     kind: "cd"
     ckpt: "ns_student/exp_22/saved_state/checkpoint_75.pt"
@@ -99,4 +113,10 @@ methods:
     ckpt: "ns_student/exp_22/saved_state/checkpoint_125.pt"
     student_steps: 16
     step_counts: [16]
-    notes: "mu=16, var=150 — later checkpoint for trend check"
+    notes: "mu=16, var=150 — mid-trend"
+  - name: "NS-MM22-ckpt250"
+    kind: "cd"
+    ckpt: "ns_student/exp_22/saved_state/checkpoint_250.pt"
+    student_steps: 16
+    step_counts: [16]
+    notes: "mu=16, var=150 — late checkpoint, see if it overfits"
