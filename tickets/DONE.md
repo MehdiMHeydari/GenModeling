@@ -132,3 +132,17 @@
 - CSV gained a `dataset` column — back-compat guard errors out if the output path points at an old-header CSV rather than silently appending mismatched rows.
 - `config/ns_paper_eval.yaml` enumerates 14 evaluations covering teacher + RF ×3 ckpts + Reflow ×2 + MFM ×3 + CD-16 ×3 + MM variants. Spreads early/mid/late per method because training is non-monotone.
 - **Outcome:** Unified pipeline — same script runs Darcy and NS. Ready to run NS eval once `ns_test_indices.npy` is generated on the GPU server.
+
+## [BUG] Wasserstein cap-bias on flattened-array (2026-04-26)
+- `evaluate_paper.py` and `diagnose_ns_teacher.py` both capped flattened (N, H, W) arrays at 100k/50k by taking the **first N** elements. Because the array is sample-major, the first N elements live in the first few frames. With NS test indices being random-but-sorted within the 1000-frame tail, those first frames were temporally clustered → narrow |v| distribution → WD inflated by 10-30× across all methods.
+- Symptom: every NS method got WD ≈ 0.45-0.55, indistinguishable. Teacher gave WD 0.49 in eval but 0.014 in the diagnostic on the same model.
+- Fix (commit eaa24c5): random subsample with `np.random.RandomState(0)` — reproducible and unbiased.
+- **Outcome:** NS eval becomes interpretable. Teacher WD drops from 0.49 to 0.028 (matches diagnostic ballpark), all other methods become discriminable.
+
+## [EVAL] First-round NS numeric benchmark (2026-04-27)
+- Ran 18 (method × ckpt) entries through the unified eval after the cap-bias fix. See `tickets/KNOWLEDGE.md` for the full table.
+- **Headline:** Reflow @ 1 NFE wins (WD 0.0102, 113% of teacher diversity), beating teacher @ 75 NFE (WD 0.028) by 2.7×. Reflow is fully converged at 1 step.
+- **MM lifts CD diversity** 88% → 95% of teacher (smaller than Darcy's 19% → 54%, because CD on NS isn't catastrophic to begin with).
+- **MM costs WD** (0.026 → 0.081) — diversity intervention, not quality intervention.
+- **The Darcy "RF > Reflow" finding does NOT generalize** to NS — exact opposite holds.
+- **Outcome:** Two-dataset benchmark complete. Paper can claim Reflow as the strong NS baseline and MM as a CD-collapse fix. Now have legitimate cross-dataset comparison.

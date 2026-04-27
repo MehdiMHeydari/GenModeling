@@ -137,3 +137,44 @@ Ranked by Wasserstein (lower = better); all at 1000 test samples × 3 seeds.
 - **RF is strongest few-step method** on Darcy — MM story is not "we beat everything" but "we fix CD". Direct-training flows may deserve more attention than distillation for PDE surrogates.
 - **Reflow and MFM have flat step-count response** — both unexpected. Listed as open investigations in BACKLOG.md.
 - **Never claim "X beats Y" from one dataset** — user requires at least one more PDE dataset (Navier-Stokes / Burgers) before paper conclusions.
+
+## Second-round benchmark findings (NS, 2026-04-27)
+
+Ranked by Wasserstein on |v|; 1000 test samples × 3 seeds; teacher = ckpt 75 + DDIM 75.
+
+| Method | Best NFE | Wasserstein |
+|--------|----------|-------------|
+| **Reflow ckpt 200 @ 2 step** | **2** | **0.0098** |
+| **Reflow ckpt 200 @ 1 step** | **1** | 0.0102 |
+| Reflow ckpt 399 @ 2 step | 2 | 0.0096 |
+| RF ckpt 799 @ 10 step | 10 | 0.016 |
+| CD-16 ckpt 100 | 16 | 0.026 |
+| Teacher | 75 | 0.028 |
+| MFM ckpt 725 @ 16 step | 16 | 0.034 |
+| RF ckpt 799 @ 5 step | 5 | 0.041 |
+| MM-mm21 ckpt 75 | 16 | 0.081 |
+| MM-mm22 ckpt 75 | 16 | 0.081 |
+
+**Reflow @ 1 NFE beats every other method including the teacher at 75 NFE.** Reflow stays at WD ~0.01 from 1 → 10 steps, fully converged at one step.
+
+`struct_diversity` (% of teacher diversity 7.85):
+- Reflow ≥ 110% (113-115% — *more* diverse than teacher)
+- RF 5+ steps: 103-115%
+- MFM 16 step: 100-110%
+- MM (best): **94-95%** of teacher
+- CD-16 (baseline): **88%** of teacher
+
+**Paper-level implications, NS:**
+- **The "RF beats Reflow" finding from Darcy does NOT generalize.** On NS, Reflow is 4× better WD than RF at the same step count and matches teacher diversity. NS trajectories were apparently much more curved than Darcy's, so the reflow straightening step earns its keep.
+- **MM still lifts CD diversity** (88% → 95%) but the lift is smaller than on Darcy (19% → 54%). Honest framing: MM helps when CD has room to fail; on NS CD is already 88% of teacher diversity, so the headroom is thin.
+- **MM costs WD on NS** (CD WD 0.026 → MM WD 0.081). Same trade-off Darcy showed. MM is a **diversity** intervention, not a quality intervention.
+- **CD-16 is surprisingly close to teacher on NS** (WD 0.026 vs 0.028). CD on NS isn't the catastrophe it was on Darcy.
+- **MFM step-count is now NOT flat on NS** (unlike Darcy) — improves consistently with steps. Investigate whether the Darcy MFM flat-response was a checkpoint issue.
+
+## Wasserstein cap-bias bug (2026-04-26)
+
+`evaluate_paper.py` and `diagnose_ns_teacher.py` both capped flattened (N, H, W) arrays at 100k/50k by taking the first N elements. The first N elements live in the first ~6 frames. With NS test indices being sorted random within a 1000-frame tail, those first frames are temporally clustered → narrow |v| distribution → WD inflated by ~10-30×.
+
+Fix (commit eaa24c5): subsample uniformly at random with `np.random.RandomState(0)`. Reproducible, unbiased.
+
+**Watch for this in any new metric that caps a flattened sample array.** Random subsample, not first-N.
