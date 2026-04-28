@@ -1,5 +1,25 @@
 # Active Work
 
+> 🚨 **HIGH PRIORITY — NS test set must be redone before final paper results**
+> The locked NS test indices (`data/ns_test_indices.npy`) are the LAST
+> 1000 frames of the flattened time series. Sanity check (2026-04-27,
+> `diagnostics/reflow_sanity/nn_distances.png`) showed those frames have
+> NN distance ~52 to training, vs ~1 for random samples from full dataset.
+> The held-out test set is structurally OOD from training — affects every
+> NS pixel-level metric we have.
+>
+> **Required fix before paper submit:**
+> 1. Redo train/test split with random shuffling, not contiguous tail
+> 2. Retrain (training set will change → all checkpoints invalidated)
+> 3. Rerun eval on new test set
+>
+> Or, if retrain is infeasible: document the test-set OOD-ness in a
+> methodology footnote and rerun eval against random-from-full-dataset
+> indices (acknowledging train-test contamination).
+>
+> Defer until after paper draft. Do not finalize numbers in paper until
+> this is resolved.
+
 > ⚠️ **wandb mixing note**: NS teacher, RF, MFM runs launched 2026-04-21/22
 > log to the `darcy-*` wandb projects (see KNOWLEDGE.md). MM-mm21,
 > MM-mm22, and any NS run launched after 2026-04-22 ~13:00 route to
