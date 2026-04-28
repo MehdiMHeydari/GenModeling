@@ -34,12 +34,14 @@ N_SHOW = 5
 SEED = 0
 
 # Curated list of (method_name, step_count). One row per story beat:
-#   1. Reflow @ 1 NFE — the winner
-#   2. RF @ 1 NFE     — direct same-NFE comparison, shows Reflow earns its keep
-#   3. MFM @ 16       — flow-matching baseline
-#   4. CD-16          — distillation baseline (the thing MM is supposed to fix)
-#   5. MM-mm21 @ 16   — MM diversity lift
+#   1. Teacher @ 75   — reference quality
+#   2. Reflow @ 1 NFE — the winner
+#   3. RF @ 1 NFE     — direct same-NFE comparison, shows Reflow earns its keep
+#   4. MFM @ 16       — flow-matching baseline
+#   5. CD-16          — distillation baseline (the thing MM is supposed to fix)
+#   6. MM-mm21 @ 16   — MM diversity lift
 DEFAULT_METHODS = [
+    ("NS-Teacher-ckpt75", 75),
     ("NS-Reflow-ckpt200", 1),
     ("NS-RF-ckpt799", 1),
     ("NS-MFM-ckpt725", 16),
