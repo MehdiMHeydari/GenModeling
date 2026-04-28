@@ -1,20 +1,15 @@
 """
-Generate per-method sample grids for the NS paper.
+Generate a single NS sample comparison figure for the paper.
 
-For each method in `config/ns_paper_eval.yaml`, draws 8 samples with seed 0,
-denormalizes, and saves a 2-row velocity-magnitude grid (GT on top, Gen on
-bottom) so the eval numbers can be visually sanity-checked. Reuses the
-sampler dispatch from `scripts/evaluate_paper.py` so model-loading stays in
-one place.
-
-For methods with multiple `step_counts`, generates one grid per step count.
+One GT row at top, one Gen row per (method, step_count) below — same noise
+seed across all rows so columns align. Skips the teacher (75-step sampling
+is slow) and only samples a curated set of paper-worthy methods. Edit
+DEFAULT_METHODS below or pass --only to override.
 
 Usage:
-    python scripts/generate_ns_samples.py --gpu 2
-    python scripts/generate_ns_samples.py --gpu 2 \\
-        --only "NS-Reflow-ckpt200,NS-Teacher-ckpt75"
-    python scripts/generate_ns_samples.py --gpu 2 \\
-        --output_dir paper_figures/ns_samples_v1
+    python scripts/generate_ns_samples.py --gpu 6
+    python scripts/generate_ns_samples.py --gpu 6 \\
+        --only "NS-Reflow-ckpt200@1,NS-RF-ckpt799@10"
 """
 
 import argparse
@@ -28,7 +23,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from src.eval.constants import SCHEDULE_S, get_dataset, load_test_indices
+from src.eval.constants import get_dataset, load_test_indices
 from scripts.evaluate_paper import (
     KIND_SAMPLERS, denormalize, make_noise, make_unet_cfg, resolve_ckpt,
     to_scalar_field,
@@ -38,26 +33,64 @@ from scripts.evaluate_paper import (
 N_SHOW = 8
 SEED = 0
 
+# Curated list of (method_name, step_count) to include. Picked from the
+# 2026-04-27 eval — best of each family, no teacher.
+DEFAULT_METHODS = [
+    ("NS-Reflow-ckpt200", 1),    # winner: WD 0.0102 at 1 NFE
+    ("NS-Reflow-ckpt200", 2),    # also strong
+    ("NS-RF-ckpt799", 10),       # best RF round 1 (WD 0.016)
+    ("NS-MFM-ckpt725", 16),      # latest MFM (WD 0.034)
+    ("NS-CD16-ckpt999", 16),     # baseline
+    ("NS-MM21-ckpt75", 16),      # MM diversity-lift winner
+    ("NS-MM22-ckpt75", 16),      # other MM
+]
 
-def gt_grid(real_denorm, n_show):
-    return to_scalar_field(real_denorm[:n_show])
+
+def parse_only(s):
+    out = []
+    for token in s.split(","):
+        token = token.strip()
+        if "@" not in token:
+            raise SystemExit(f"--only entries must be 'method@steps', got '{token}'")
+        name, steps = token.split("@", 1)
+        out.append((name.strip(), int(steps.strip())))
+    return out
 
 
-def plot_method(gt_mag, gen_mag, path, title):
-    """Each pair (GT_j, Gen_j) shares a vmax so structure within a pair is
-    comparable, but pairs do NOT share vmax — NS |v| is heavy-tailed (max
-    ~3.6 vs p99 ~0.9), so a single global vmax washes calmer frames into a
-    near-flat dim color."""
-    fig, axes = plt.subplots(2, gen_mag.shape[0], figsize=(2.2 * gen_mag.shape[0], 5.0))
-    for j in range(gen_mag.shape[0]):
-        vmax = max(gt_mag[j].max(), gen_mag[j].max())
+def plot_combined(gt_mag, gen_rows, path):
+    """gen_rows: list of (label, gen_mag_array). One GT row + one Gen row per method."""
+    n_methods = len(gen_rows)
+    n_rows = 1 + n_methods
+    fig, axes = plt.subplots(n_rows, N_SHOW,
+                             figsize=(2.2 * N_SHOW, 2.4 * n_rows),
+                             squeeze=False)
+
+    for j in range(N_SHOW):
+        # Per-column shared vmax across GT and all Gen rows so each column
+        # is internally comparable; columns can have different vmax because
+        # NS |v| is heavy-tailed (one frame can have 3x the energy of others).
+        col_vals = [gt_mag[j].max()] + [gen[j].max() for _, gen in gen_rows]
+        vmax = max(col_vals)
+
         axes[0, j].imshow(gt_mag[j], vmin=0.0, vmax=vmax)
-        axes[0, j].set_title("GT |v|", fontsize=8)
         axes[0, j].axis("off")
-        axes[1, j].imshow(gen_mag[j], vmin=0.0, vmax=vmax)
-        axes[1, j].set_title("Gen |v|", fontsize=8)
-        axes[1, j].axis("off")
-    fig.suptitle(title, fontsize=11)
+        for i, (_, gen_mag) in enumerate(gen_rows, start=1):
+            axes[i, j].imshow(gen_mag[j], vmin=0.0, vmax=vmax)
+            axes[i, j].axis("off")
+
+    axes[0, 0].set_ylabel("GT |v|", fontsize=10, rotation=0,
+                          labelpad=80, ha="right", va="center")
+    for i, (label, _) in enumerate(gen_rows, start=1):
+        axes[i, 0].set_ylabel(label, fontsize=9, rotation=0,
+                              labelpad=80, ha="right", va="center")
+    # imshow + axis off hides ylabels — re-show them
+    for i in range(n_rows):
+        axes[i, 0].axis("on")
+        axes[i, 0].set_xticks([])
+        axes[i, 0].set_yticks([])
+        for spine in axes[i, 0].spines.values():
+            spine.set_visible(False)
+
     fig.tight_layout()
     fig.savefig(path, dpi=130, bbox_inches="tight")
     plt.close(fig)
@@ -67,30 +100,34 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--gpu", type=int, default=0)
     p.add_argument("--config", type=str, default="config/ns_paper_eval.yaml")
-    p.add_argument("--output_dir", type=str, default="paper_figures/ns_samples")
+    p.add_argument("--output", type=str, default="paper_figures/ns_samples_combined.png")
     p.add_argument("--only", type=str, default=None,
-                   help="Comma-separated method names (subset of config)")
+                   help="Comma list of 'method@steps' tuples to override DEFAULT_METHODS")
     args = p.parse_args()
 
     os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu)
     device = "cuda" if th.cuda.is_available() else "cpu"
-    os.makedirs(args.output_dir, exist_ok=True)
+    os.makedirs(os.path.dirname(args.output), exist_ok=True)
 
     with open(args.config) as f:
         cfg = yaml.safe_load(f)
-    methods = cfg["methods"]
-    if args.only:
-        wanted = {s.strip() for s in args.only.split(",")}
-        methods = [m for m in methods if m["name"] in wanted]
-        if not methods:
-            raise SystemExit(f"No methods matched --only={args.only}")
+    by_name = {m["name"]: m for m in cfg["methods"]}
+
+    selection = parse_only(args.only) if args.only else DEFAULT_METHODS
+    plan = []
+    for name, steps in selection:
+        if name not in by_name:
+            print(f"[skip] not in config: {name}")
+            continue
+        plan.append((name, steps, by_name[name]))
+    if not plan:
+        raise SystemExit("Nothing to sample")
 
     dataset = cfg.get("dataset", "ns")
     ds = get_dataset(dataset)
     data_shape = ds["data_shape"]
     unet_cfg = make_unet_cfg(data_shape)
 
-    # Load just enough GT to populate the grid.
     data_min = np.load(os.path.join(ds["stats_dir"], "data_min.npy"))
     data_max = np.load(os.path.join(ds["stats_dir"], "data_max.npy"))
     test_idx = load_test_indices(dataset)[:N_SHOW]
@@ -99,43 +136,29 @@ def main():
     if data.ndim == 3:
         data = data[:, None]
     real_denorm = data[test_idx]
-    gt_mag = gt_grid(real_denorm, N_SHOW)
+    gt_mag = to_scalar_field(real_denorm)
 
     noise = make_noise(SEED, N_SHOW, data_shape)
 
-    for entry in methods:
+    gen_rows = []
+    for name, steps, entry in plan:
         kind = entry["kind"]
-        if kind not in KIND_SAMPLERS:
-            print(f"[skip] unknown kind: {kind} ({entry['name']})")
-            continue
-        try:
-            ckpt = resolve_ckpt(entry)
-        except FileNotFoundError as e:
-            print(f"[skip] {entry['name']}: {e}")
-            continue
-
         sampler = KIND_SAMPLERS[kind]
-        step_counts = entry.get("step_counts", [entry.get("student_steps")])
+        ckpt = resolve_ckpt(entry)
+        if kind == "cd":
+            samples, nfe = sampler(ckpt, entry["student_steps"], noise,
+                                   device, unet_cfg, batch_size=N_SHOW)
+        else:
+            samples, nfe = sampler(ckpt, steps, noise, device, unet_cfg,
+                                   batch_size=N_SHOW)
+        gen_denorm = denormalize(samples, data_min, data_max)
+        gen_mag = to_scalar_field(gen_denorm)
+        label = f"{name}\n({steps}s, NFE={nfe})"
+        gen_rows.append((label, gen_mag))
+        print(f"  sampled {name} @ {steps} steps")
 
-        for n_steps in step_counts:
-            if kind == "cd":
-                samples, nfe = sampler(
-                    ckpt, entry["student_steps"], noise, device, unet_cfg,
-                    batch_size=N_SHOW,
-                )
-            else:
-                samples, nfe = sampler(ckpt, n_steps, noise, device, unet_cfg,
-                                       batch_size=N_SHOW)
-            gen_denorm = denormalize(samples, data_min, data_max)
-            gen_mag = to_scalar_field(gen_denorm)
-
-            tag = f"{entry['name']}_steps{n_steps}"
-            title = f"{entry['name']}  |  {n_steps} steps  |  NFE={nfe}"
-            out = os.path.join(args.output_dir, f"{tag}.png")
-            plot_method(gt_mag, gen_mag, out, title)
-            print(f"  wrote {out}")
-
-    print(f"\nDone. Sample grids in {args.output_dir}/")
+    plot_combined(gt_mag, gen_rows, args.output)
+    print(f"\nWrote {args.output}")
 
 
 if __name__ == "__main__":
