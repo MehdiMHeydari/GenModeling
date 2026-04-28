@@ -18,10 +18,9 @@ unet:
   num_classes:
 
 cd:
-  # Point to whichever NS teacher checkpoint is freshest at launch time.
-  # Teacher is still training; update this to the latest checkpoint you have
-  # (e.g. checkpoint_500.pt) before launching this job.
-  teacher_checkpoint: "ns_teacher/exp_1/saved_state/checkpoint_500.pt"
+  # Canonical NS teacher per teacher diagnostic v3 (ckpt 75 + DDIM 75 has
+  # the lowest WD; training is non-monotone so latest is not best).
+  teacher_checkpoint: "ns_teacher/exp_1/saved_state/checkpoint_75.pt"
   student_steps: 4
   schedule_s: 0.008
   ema_rate: 0.9999

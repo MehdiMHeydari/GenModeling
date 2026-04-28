@@ -219,31 +219,73 @@ def main():
     print("  → Reflow's WD should be ~same on held-out and fresh GT.")
 
     # ---------------------------------------------------------------
-    # Test 4: noise interpolation
+    # Test 4: noise interpolation (linear + spherical)
     # ---------------------------------------------------------------
-    print("\n[4/4] Noise interpolation through Reflow")
+    # Linear interpolation z_t = (1-t)z1 + t*z2 reduces |z_t| at t=0.5
+    # to ~sqrt(0.5)*|z|, putting the model OOD relative to the unit-variance
+    # noise it was trained on. SLERP keeps |z_t| constant — proper test of
+    # whether the model has a continuous mapping in noise space.
+    print("\n[4/4] Noise interpolation through Reflow (linear + SLERP)")
     n_steps = 11
     th.manual_seed(SEED)
     z1 = th.randn(1, *data_shape)
     z2 = th.randn(1, *data_shape)
     ts = np.linspace(0, 1, n_steps)
-    z_path = th.cat([(1 - t) * z1 + t * z2 for t in ts], dim=0)
-    interp_samples, _ = sample_rf(REFLOW_CKPT, 1, z_path, device, unet_cfg,
-                                  batch_size=n_steps)
-    interp_denorm = denormalize(interp_samples, data_min, data_max)
-    interp_mag = to_scalar_field(interp_denorm)
 
-    fig, axes = plt.subplots(1, n_steps, figsize=(2.0 * n_steps, 2.4))
+    # --- Linear ---
+    z_lin = th.cat([(1 - t) * z1 + t * z2 for t in ts], dim=0)
+    samples_lin, _ = sample_rf(REFLOW_CKPT, 1, z_lin, device, unet_cfg,
+                               batch_size=n_steps)
+    mag_lin = to_scalar_field(denormalize(samples_lin, data_min, data_max))
+
+    # --- Spherical (SLERP) ---
+    # theta = angle between z1 and z2 viewed as unit vectors in flat space
+    z1_flat = z1.flatten()
+    z2_flat = z2.flatten()
+    cos_theta = float((z1_flat @ z2_flat) /
+                      (z1_flat.norm() * z2_flat.norm() + 1e-12))
+    cos_theta = max(-1.0, min(1.0, cos_theta))
+    theta = float(np.arccos(cos_theta))
+    sin_theta = float(np.sin(theta)) if theta > 1e-6 else 1.0
+
+    z_slerp_list = []
+    for t in ts:
+        if theta < 1e-6:
+            zt = (1 - t) * z1 + t * z2
+        else:
+            a = float(np.sin((1 - t) * theta) / sin_theta)
+            b = float(np.sin(t * theta) / sin_theta)
+            zt = a * z1 + b * z2
+        z_slerp_list.append(zt)
+    z_slerp = th.cat(z_slerp_list, dim=0)
+    samples_slerp, _ = sample_rf(REFLOW_CKPT, 1, z_slerp, device, unet_cfg,
+                                 batch_size=n_steps)
+    mag_slerp = to_scalar_field(denormalize(samples_slerp, data_min, data_max))
+
+    fig, axes = plt.subplots(2, n_steps, figsize=(2.0 * n_steps, 4.8))
     for i in range(n_steps):
-        axes[i].imshow(interp_mag[i])
-        axes[i].axis("off")
-        axes[i].set_title(f"t={ts[i]:.2f}", fontsize=8)
-    fig.suptitle("Reflow @ 1 step: noise interpolation z_t = (1-t)z1 + t·z2",
+        axes[0, i].imshow(mag_lin[i])
+        axes[0, i].axis("off")
+        axes[0, i].set_title(f"t={ts[i]:.2f}", fontsize=8)
+        axes[1, i].imshow(mag_slerp[i])
+        axes[1, i].axis("off")
+    axes[0, 0].set_ylabel("Linear", fontsize=11, rotation=0,
+                          labelpad=40, ha="right", va="center")
+    axes[1, 0].set_ylabel("SLERP", fontsize=11, rotation=0,
+                          labelpad=40, ha="right", va="center")
+    for i in [0, 1]:
+        axes[i, 0].axis("on")
+        axes[i, 0].set_xticks([]); axes[i, 0].set_yticks([])
+        for spine in axes[i, 0].spines.values():
+            spine.set_visible(False)
+    fig.suptitle("Reflow @ 1 step: noise interpolation (linear vs spherical)",
                  fontsize=11)
     fig.tight_layout()
     fig.savefig(os.path.join(OUT_DIR, "noise_interpolation.png"), dpi=130, bbox_inches="tight")
     plt.close(fig)
-    print("  → smooth path = continuous mapping. Discrete jumps = memorized modes.")
+    print("  Linear (top row): goes OOD at intermediate t — variance drops")
+    print("  SLERP  (bot row): preserves |z|=const, true test of continuity")
+    print("  → SLERP smooth = continuous mapping. SLERP jumps = memorized modes.")
 
     print(f"\nDone. Plots in {OUT_DIR}/.")
 
