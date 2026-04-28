@@ -30,19 +30,21 @@ from scripts.evaluate_paper import (
 )
 
 
-N_SHOW = 8
+N_SHOW = 5
 SEED = 0
 
-# Curated list of (method_name, step_count) to include. Picked from the
-# 2026-04-27 eval — best of each family, no teacher.
+# Curated list of (method_name, step_count). One row per story beat:
+#   1. Reflow @ 1 NFE — the winner
+#   2. RF @ 1 NFE     — direct same-NFE comparison, shows Reflow earns its keep
+#   3. MFM @ 16       — flow-matching baseline
+#   4. CD-16          — distillation baseline (the thing MM is supposed to fix)
+#   5. MM-mm21 @ 16   — MM diversity lift
 DEFAULT_METHODS = [
-    ("NS-Reflow-ckpt200", 1),    # winner: WD 0.0102 at 1 NFE
-    ("NS-Reflow-ckpt200", 2),    # also strong
-    ("NS-RF-ckpt799", 10),       # best RF round 1 (WD 0.016)
-    ("NS-MFM-ckpt725", 16),      # latest MFM (WD 0.034)
-    ("NS-CD16-ckpt999", 16),     # baseline
-    ("NS-MM21-ckpt75", 16),      # MM diversity-lift winner
-    ("NS-MM22-ckpt75", 16),      # other MM
+    ("NS-Reflow-ckpt200", 1),
+    ("NS-RF-ckpt799", 1),
+    ("NS-MFM-ckpt725", 16),
+    ("NS-CD16-ckpt999", 16),
+    ("NS-MM21-ckpt75", 16),
 ]
 
 
@@ -130,7 +132,14 @@ def main():
 
     data_min = np.load(os.path.join(ds["stats_dir"], "data_min.npy"))
     data_max = np.load(os.path.join(ds["stats_dir"], "data_max.npy"))
-    test_idx = load_test_indices(dataset)[:N_SHOW]
+    # Spread GT picks across the full test set rather than taking the first
+    # N indices. NS is a time series, so consecutive (or near-consecutive)
+    # indices show the same flow state at neighboring time steps and look
+    # almost identical. Linspace through the sorted test indices gives 5
+    # samples at maximally separated times.
+    full_test_idx = load_test_indices(dataset)
+    spread = np.linspace(0, len(full_test_idx) - 1, N_SHOW).astype(int)
+    test_idx = full_test_idx[spread]
     with h5py.File(ds["data_path"], "r") as f:
         data = f["tensor"][:]
     if data.ndim == 3:
