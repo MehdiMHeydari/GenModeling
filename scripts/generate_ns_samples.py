@@ -44,14 +44,17 @@ def gt_grid(real_denorm, n_show):
 
 
 def plot_method(gt_mag, gen_mag, path, title):
+    """Each pair (GT_j, Gen_j) shares a vmax so structure within a pair is
+    comparable, but pairs do NOT share vmax — NS |v| is heavy-tailed (max
+    ~3.6 vs p99 ~0.9), so a single global vmax washes calmer frames into a
+    near-flat dim color."""
     fig, axes = plt.subplots(2, gen_mag.shape[0], figsize=(2.2 * gen_mag.shape[0], 5.0))
-    vmin = 0.0
-    vmax = max(gt_mag.max(), gen_mag.max())
     for j in range(gen_mag.shape[0]):
-        axes[0, j].imshow(gt_mag[j], vmin=vmin, vmax=vmax)
+        vmax = max(gt_mag[j].max(), gen_mag[j].max())
+        axes[0, j].imshow(gt_mag[j], vmin=0.0, vmax=vmax)
         axes[0, j].set_title("GT |v|", fontsize=8)
         axes[0, j].axis("off")
-        axes[1, j].imshow(gen_mag[j], vmin=vmin, vmax=vmax)
+        axes[1, j].imshow(gen_mag[j], vmin=0.0, vmax=vmax)
         axes[1, j].set_title("Gen |v|", fontsize=8)
         axes[1, j].axis("off")
     fig.suptitle(title, fontsize=11)
