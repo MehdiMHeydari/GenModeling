@@ -90,6 +90,19 @@ _DATASETS = {
         "teacher_ddim_steps": 75,
         "train_samples": 7000,
     },
+    "rd": {
+        # 2D Reaction-Diffusion from PDEBench. 2 channels (u, v concentrations),
+        # 128x128, ~10k frames after preprocessing. Teacher checkpoint and
+        # canonical step count to be set after the diagnostic sweep on this
+        # dataset (mirroring the NS workflow).
+        "data_path": "data/rd_128_merged.h5",
+        "data_shape": (2, 128, 128),
+        "stats_dir": "rd_teacher/exp_1/saved_state",
+        "test_indices_path": "data/rd_test_indices.npy",
+        "teacher_ckpt": "rd_teacher/exp_1/saved_state/checkpoint_TBD.pt",
+        "teacher_ddim_steps": 75,
+        "train_samples": 9000,
+    },
 }
 
 
