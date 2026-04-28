@@ -62,7 +62,14 @@ def parse_only(s):
 
 
 def plot_combined(gt_mag, gen_rows, path):
-    """gen_rows: list of (label, gen_mag_array). One GT row + one Gen row per method."""
+    """gen_rows: list of (label, gen_mag_array). One GT row + one Gen row per method.
+
+    Per-image autoscale: each cell uses its own vmin/vmax so structure is
+    fully visible. We tried per-column shared vmax, but NS's heavy-tailed
+    |v| (max ~3.6 vs mean ~0.18) means one bright outlier washes the rest
+    of the column to a near-flat dim. For a sanity-check figure, structure
+    visibility matters more than cross-cell intensity comparison.
+    """
     n_methods = len(gen_rows)
     n_rows = 1 + n_methods
     fig, axes = plt.subplots(n_rows, N_SHOW,
@@ -70,16 +77,10 @@ def plot_combined(gt_mag, gen_rows, path):
                              squeeze=False)
 
     for j in range(N_SHOW):
-        # Per-column shared vmax across GT and all Gen rows so each column
-        # is internally comparable; columns can have different vmax because
-        # NS |v| is heavy-tailed (one frame can have 3x the energy of others).
-        col_vals = [gt_mag[j].max()] + [gen[j].max() for _, gen in gen_rows]
-        vmax = max(col_vals)
-
-        axes[0, j].imshow(gt_mag[j], vmin=0.0, vmax=vmax)
+        axes[0, j].imshow(gt_mag[j])
         axes[0, j].axis("off")
         for i, (_, gen_mag) in enumerate(gen_rows, start=1):
-            axes[i, j].imshow(gen_mag[j], vmin=0.0, vmax=vmax)
+            axes[i, j].imshow(gen_mag[j])
             axes[i, j].axis("off")
 
     axes[0, 0].set_ylabel("GT |v|", fontsize=10, rotation=0,
