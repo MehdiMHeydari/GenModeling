@@ -80,6 +80,19 @@ def plot_combined(gt_mag, gen_rows, path):
             axes[i, j].imshow(gen_mag[j])
             axes[i, j].axis("off")
 
+    axes[0, 0].set_ylabel("GT", fontsize=10, rotation=0,
+                          labelpad=80, ha="right", va="center")
+    for i, (label, _) in enumerate(gen_rows, start=1):
+        axes[i, 0].set_ylabel(label, fontsize=9, rotation=0,
+                              labelpad=80, ha="right", va="center")
+    # imshow + axis off hides ylabels — re-show them
+    for i in range(n_rows):
+        axes[i, 0].axis("on")
+        axes[i, 0].set_xticks([])
+        axes[i, 0].set_yticks([])
+        for spine in axes[i, 0].spines.values():
+            spine.set_visible(False)
+
     fig.tight_layout()
     fig.savefig(path, dpi=130, bbox_inches="tight")
     plt.close(fig)
