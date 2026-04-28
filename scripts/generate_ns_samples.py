@@ -30,7 +30,7 @@ from scripts.evaluate_paper import (
 )
 
 
-N_SHOW = 5
+N_SHOW = 8
 SEED = 0
 
 # Curated list of (method_name, step_count). One row per story beat:
