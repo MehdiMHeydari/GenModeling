@@ -98,17 +98,17 @@ def sample_ddim(teacher, noise, n_steps, device, batch_size=32):
     return th.cat(out, dim=0)
 
 
-def plot_grid(samples_denorm, gt_denorm, path, title):
-    n_show = min(8, samples_denorm.shape[0])
+def plot_grid(samples_denorm, gt_denorm, path, title, n_show=8):
+    n_show = min(n_show, samples_denorm.shape[0])
     gt_mag = magnitude(gt_denorm[:n_show])
     gen_mag = magnitude(samples_denorm[:n_show])
-    fig, axes = plt.subplots(2, n_show, figsize=(2.2 * n_show, 5.0))
+    fig, axes = plt.subplots(2, n_show, figsize=(1.8 * n_show, 4.0))
     for j in range(n_show):
         axes[0, j].imshow(gt_mag[j])
-        axes[0, j].set_title("GT", fontsize=8)
+        axes[0, j].set_title("GT", fontsize=7)
         axes[0, j].axis("off")
         axes[1, j].imshow(gen_mag[j])
-        axes[1, j].set_title("Gen", fontsize=8)
+        axes[1, j].set_title("Gen", fontsize=7)
         axes[1, j].axis("off")
     fig.suptitle(title, fontsize=11)
     fig.tight_layout()
@@ -158,6 +158,8 @@ def main():
                    default=[75, 200, 400, 599])
     p.add_argument("--step_counts", type=int, nargs="+", default=[75])
     p.add_argument("--n_samples", type=int, default=200)
+    p.add_argument("--n_show", type=int, default=8,
+                   help="Samples per row in the plotted grid")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--output_dir", type=str, default="diagnostics/rd_teacher_v1")
     args = p.parse_args()
@@ -218,7 +220,8 @@ def main():
 
             title = f"RD ckpt {epoch}  |  DDIM {n_steps} steps  |  NFE={n_steps}"
             plot_grid(gen, real_denorm,
-                      os.path.join(args.output_dir, f"{tag}_grid.png"), title)
+                      os.path.join(args.output_dir, f"{tag}_grid.png"), title,
+                      n_show=args.n_show)
             plot_hist(gen, real_denorm,
                       os.path.join(args.output_dir, f"{tag}_hist.png"), title)
             plot_hist_per_channel(gen, real_denorm,
