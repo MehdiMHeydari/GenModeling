@@ -25,50 +25,67 @@
 > MM-mm22, and any NS run launched after 2026-04-22 ~13:00 route to
 > `ns-*` correctly.
 
-## In flight — NS training (still running but eval already gives stable numbers)
+## In flight
 
-### [INFRA] GPU 4: NS MFM (epoch ~725/1000)
-- Tmux: `ns_mfm`
-- Latest checkpoint included in current eval: `checkpoint_725.pt`
-- Still improving with training but slowly; stable trend in eval
+**Nothing.** All NS training jobs have finished. RD teacher just finished
+at epoch 599. GPUs 3, 5, 6, 7 are idle.
 
-### [INFRA] GPU 5: NS MM-mm21 (epoch ~150/300)
-- Tmux: `ns_moments`
-- Latest in eval: ckpt 75 + ckpt 150
-- Numbers flat past ckpt 75 — could kill if GPU is needed elsewhere
+## Queued — RD downstream training (the third-dataset benchmark)
 
-### [INFRA] GPU 1: NS MM-mm22 (epoch ~250/300)
-- Tmux: `ns_mm22`
-- Latest in eval: ckpt 75, 125, 250
-- Same as mm21 — flat past peak, could kill
+### [INFRA] RD teacher diagnostic (highest priority before downstream)
+- Mirror `scripts/diagnose_ns_teacher.py` for RD; pick canonical
+  checkpoint + step count
+- NS taught us training is non-monotone — don't blindly use the
+  latest checkpoint
+- Sweep across {early, mid, late} ckpts × DDIM step counts
+- ~30 min per checkpoint on a free GPU
 
-## Queued
+### [INFRA] RD RF round 1 (teacher-independent, can launch now)
+- Need: `config/rd_rectified_flow.yaml` (TODO — copy from NS)
+- 800 epochs, ~21h on A100
+- Output: `rd_rectified_flow/exp_1/saved_state/`
 
-### [PAPER] Generate NS sample grid + histograms
-- `scripts/generate_ns_samples.py` (newly added 2026-04-27): pulls 8 samples per
-  method from `config/ns_paper_eval.yaml`, side-by-side GT vs Gen velocity-
-  magnitude grids
-- Run after eval: `python scripts/generate_ns_samples.py --gpu 2`
-- Visual sanity check that the Reflow @ 1 NFE win is real and not artifactual
+### [INFRA] RD Reflow round 2 (after RF round 1 finishes)
+- Need: `config/rd_rectified_flow_reflow.yaml`
+- ~10h after RF done
+
+### [INFRA] RD MFM (teacher-independent, can launch now)
+- Need: `config/rd_mean_flow.yaml`
+- 1000 epochs, ~14h
+
+### [INFRA] RD CD-16 baseline (teacher-dependent — wait for diagnostic)
+- Need: `config/rd_cm_cd.yaml`
+- ~33h
+
+### [INFRA] RD MM variant (teacher-dependent — wait for diagnostic)
+- Need: `config/rd_cm_cd_mm.yaml` + precomputed teacher moments
+- Slow due to moment_every=1 — ~4 days
+
+## Queued — NS
+
+### [EVAL] Re-run NS eval with new checkpoints
+- Add CD-4 (epoch 999) row + update MFM/MM rows to final checkpoints
+- Update `config/ns_paper_eval.yaml` first (add CD-4 entry, bump MFM 725→999, bump MM 150/250→299)
+- Run on a free GPU, ~3-4h
+- Results CSV: append/replace in `results/ns_eval_all.csv`
+
+## Queued — Paper writing
 
 ### [PAPER] Fill in `paper/main.tex` with real numbers
-- Two-dataset story now lockable: Darcy (Table N) + NS (Table M)
-- Methods section can be drafted in parallel — doesn't depend on numbers
+- Two-dataset story now lockable (Darcy + NS)
+- RD will be a third panel once benchmark is in
+- Methods section can be drafted now — doesn't depend on numbers
 
 ### [PAPER] Cross-dataset comparison plot
-- Pareto: WD vs NFE, faceted by dataset, one curve per method
-- Reflow line should sit at the bottom of the NS panel; RF line at the bottom of the Darcy panel
-- Drives home "best method is dataset-dependent" → why we needed both datasets
-
-### [DECISION] Should we kill MM jobs?
-- Numbers are flat. ~15 days of GPU-hours each remaining.
-- Kill saves time; cost is "we won't see if MM somehow improves at ckpt 300."
-- Darcy says it doesn't. Recommend: kill.
+- Pareto: WD vs NFE, faceted by dataset
+- "Best method is dataset-dependent" headline plot
 
 ## Cleanup
 
-### [INFRA] Kill stale tmux sessions
-Safe to kill: `eval_A`, `eval_B`, `eval_all`, `eval_mm`, `eval_rf`, `figures`,
-`ns_diag`, `ns_download`, `ns_download_1`, `ns_rf`, `ns_teacher`,
-`ns_teacher_cd`, `ns_teacher_diag2`, `ns_teacher_diag3`, `ns_eval`, `ns_eval2`,
-`ns_reflow` (training finished at 399).
+### [INFRA] Kill stale tmux sessions (pile-up since Apr 18)
+Safe to kill (everything has either finished or is months stale):
+`check`, `darcy_cd`, `eval_A`, `eval_B`, `eval_all`, `eval_mm`, `eval_rf`,
+`figures`, `ns_cd4`, `ns_diag`, `ns_download`, `ns_download_1`, `ns_eval`,
+`ns_eval2`, `ns_mfm`, `ns_mm22`, `ns_moments`, `ns_reflow`, `ns_rf`,
+`ns_samples`, `ns_teacher`, `ns_teacher_cd`, `ns_teacher_diag2`,
+`ns_teacher_diag3`, `rd_teacher` (training finished).
