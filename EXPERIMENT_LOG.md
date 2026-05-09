@@ -565,3 +565,153 @@ GenModeling-main/
 - student_steps=4 causes mode collapse (exp_1)
 - student_steps=8 and 16 produce diversity but don't match teacher quality
 - Larger effective batch sizes (grad_accum) help but don't solve the fundamental issue
+
+---
+
+## Experiment 5: CD Training-Time Moment Matching (exp 6-10) — FAILED
+
+**Directory:** `darcy_student/exp_{6,7,8,9,10}/`
+
+### What it does
+Adds a moment-matching regularizer during training that compares per-sample spatial moments of the student's training predictions (`x_hat_online`) against real data (`x`). The idea was to penalize mode collapse by forcing the student's predictions to have the same mean/variance distribution as real data.
+
+### Loss formulation
+```
+Per sample i:
+  μ_pred[i] = spatial mean of x_hat_online[i]
+  σ²_pred[i] = spatial variance of x_hat_online[i]
+  μ_real[i], σ²_real[i] = same for real data x[i]
+
+L_mu  = (mean(μ_pred) - mean(μ_real))² + (var(μ_pred) - var(μ_real))²
+L_var = (mean(σ²_pred) - mean(σ²_real))² + (var(σ²_pred) - var(σ²_real))²
+
+total = CD_loss + moment_weight_mu * L_mu + moment_weight_var * L_var
+```
+
+### Experiment grid
+
+| Exp | GPU | `moment_weight_mu` | `moment_weight_var` | Epochs | Result |
+|-----|-----|-------------------|--------------------|----|--------|
+| 6   | 1   | 0.0               | 0.1                | 550+ | No effect |
+| 7   | 2   | 0.0               | 1.0                | 550+ | No effect |
+| 9   | 3   | 0.1               | 1.0                | 550+ | No effect |
+| 8   | -   | 0.1               | 0.1                | Never launched | - |
+| 10  | -   | 1.0               | 1.0                | Never launched | - |
+
+Config files: `config/unet_cm_cd_exp6.yaml` through `config/unet_cm_cd_exp10.yaml`
+
+### Why it failed
+Diagnostic script (`scripts/diagnose_moment_loss.py`) showed:
+- CD gradient norm: 35.54 vs moment variance gradient norm: 0.001039 (34,208x ratio)
+- Training predictions already match real data batch statistics (gaps ~0.001)
+- The moment loss is near-zero because CD loss already forces each prediction to approximate its target
+- **Mode collapse is an inference-time problem** — it happens in the noise-to-data mapping during sampling, not in the training-time predictions
+
+### Key insight
+Training-time predictions are conditioned on real data (the forward diffusion starts from a real sample), so they naturally have correct statistics. The mode collapse only manifests when running the full sampling chain from pure noise — a fundamentally different code path.
+
+---
+
+## Experiment 6: CD Sampling-Based Moment Matching (exp 11-13) — IN PROGRESS
+
+**Directory:** `darcy_student/exp_{11,12,13}/`
+
+### What it does
+Fixes the fundamental flaw of exp 6-10 by running the full student sampling chain during training and comparing the **generated sample** moments against pre-computed **teacher sample** moments. This directly attacks inference-time mode collapse.
+
+### Pre-computed teacher moments
+Script: `python scripts/precompute_teacher_moments.py`
+- Generates 1000 samples from teacher (50-step DDIM, raw weights)
+- Computes per-sample spatial mean μ and spatial variance σ² for each sample
+- Saves distribution statistics: `mu_mean`, `mu_var`, `var_mean`, `var_var`
+- Output: `darcy_teacher/exp_1/saved_state/teacher_moments.pt`
+
+### Loss formulation
+During training (every 50 iterations):
+1. Sample `moment_batch_size=16` noise vectors
+2. Run full 16-step student sampling chain (same as inference)
+3. Compute per-sample spatial mean/variance of generated samples
+4. Compare against teacher moment statistics:
+```
+L_mu  = (mean(μ_student) - teacher_mu_mean)² + (var(μ_student) - teacher_mu_var)²
+L_var = (mean(σ²_student) - teacher_var_mean)² + (var(σ²_student) - teacher_var_var)²
+
+moment_loss = moment_weight_mu * L_mu + moment_weight_var * L_var
+```
+
+### Memory management
+The CD computation graph uses ~39GB on A100 80GB. Running 16 forward passes simultaneously would OOM. Solution:
+1. **Separate backward passes:** CD loss backward first (frees ~39GB graph), then moment loss backward
+2. **Random single-step gradient:** Only 1 of 16 sampling steps gets gradient per iteration; other steps run with `no_grad`
+3. **Three-case gradient logic** in sampling loop:
+   - Steps before grad step (`i > grad_step`): full `no_grad`
+   - At grad step (`i == grad_step`): model with gradient, `z.detach()` input
+   - Steps after grad step (`i < grad_step`): model prediction with `no_grad`, but `ddim_step` runs OUTSIDE `no_grad` so `z` carries gradient through the chain
+
+### Weight calibration
+`scripts/measure_moment_gap.py` measured actual moment gaps on generated samples:
+- `loss_mu ≈ 0.036` (comparable to CD loss ~0.03)
+- `loss_var ≈ 0.00125` (needs ~25x weight to match CD loss)
+
+### Experiment grid
+
+| Exp | GPU | `moment_weight_mu` | `moment_weight_var` | ~% of CD loss | Status |
+|-----|-----|-------------------|--------------------|----|--------|
+| 11  | cuda:1 | 0.0 | 5.0   | ~21% (var only) | Launching (2026-03-17) |
+| 12  | cuda:2 | 0.0 | 10.0  | ~42% (var only) | Launching (2026-03-17) |
+| 13  | cuda:3 | 1.0 | 25.0  | ~225% (both, aggressive) | Launching (2026-03-17) |
+
+Config files: `config/unet_cm_cd_exp11.yaml`, `config/unet_cm_cd_exp12.yaml`, `config/unet_cm_cd_exp13.yaml`
+
+All configs share: `moment_every: 50`, `moment_batch_size: 16`, `teacher_moments_path: "darcy_teacher/exp_1/saved_state/teacher_moments.pt"`, `num_epochs: 1000`, `save_epoch_int: 25`
+
+### Training loop modification (`scripts/train_cm.py`)
+```python
+for batch_idx, batch in enumerate(train_loader):
+    loss = objective(model, batch, device=dev) / grad_accum
+    loss.backward()  # CD graph freed here
+
+    # Sampling-based moment loss (separate backward, after CD graph is freed)
+    moment_loss = objective.sample_moment_loss(model, dev)
+    if moment_loss is not None:
+        moment_loss.backward()
+
+    if (batch_idx + 1) % grad_accum == 0 or (batch_idx + 1) == len(train_loader):
+        optim.step()
+        model.update_ema()
+        optim.zero_grad()
+```
+
+### Bugs encountered during implementation
+1. **OOM #1:** Old exp 6/7/9 processes still running on GPUs 1-3, consuming 39GB each. Fix: kill those PIDs.
+2. **OOM #2:** Original implementation computed moment sampling inside `__call__`, so CD graph and sampling chain were in memory simultaneously. Fix: separate `sample_moment_loss()` method called after `loss.backward()`.
+3. **OOM #3:** 16 forward passes with gradients stored too much. Fix: random single-step gradient + reduced `moment_batch_size` from 32 to 16.
+4. **Gradient chain broken** ("element 0 of tensors does not require grad"): When grad step wasn't last step, subsequent `no_grad` steps broke `z`'s `grad_fn` because `ddim_step` was inside the `no_grad` context. Fix: three-case logic keeping `ddim_step` outside `no_grad` for post-grad steps.
+
+### Wandb
+Project: `darcy-student`, runs named `cd_exp11`, `cd_exp12`, `cd_exp13`. Logs `moment_loss_mu` and `moment_loss_var` in addition to standard CD loss.
+
+---
+
+## Experiment 7: Rectified Flow (RF)
+
+**Directory:** `darcy_rectified_flow/exp_1/` and `darcy_rectified_flow_reflow/exp_1/`
+
+### RF Round 1
+| Parameter | Value |
+|-----------|-------|
+| Type | Standard rectified flow |
+| Epochs | 800 |
+| Checkpoint | `darcy_rectified_flow/exp_1/saved_state/checkpoint_799.pt` |
+
+### Reflow (Round 2)
+| Parameter | Value |
+|-----------|-------|
+| Type | Reflow with paired data from round 1 |
+| Epochs | 400 |
+| Checkpoint | `darcy_rectified_flow_reflow/exp_1/saved_state/checkpoint_399.pt` |
+
+### Step sweep
+Script: `python scripts/rf_step_sweep.py`
+- Sweeps 1-10 Euler steps for both round 1 and reflow models
+- **Finding:** Reflow produces better samples at low step counts (1-3 steps) compared to round 1
