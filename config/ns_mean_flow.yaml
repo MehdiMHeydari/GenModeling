@@ -25,7 +25,7 @@ mean_flow:
 
 dataloader:
   datapath: "data/ns_incom_128_merged.h5"
-  batch_size: 16
+  batch_size: 8
   dataset: "VF_FM"
   train_samples: 7000
   loader_type: "ns"
