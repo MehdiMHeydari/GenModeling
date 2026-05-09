@@ -91,15 +91,18 @@ _DATASETS = {
         "train_samples": 7000,
     },
     "rd": {
-        # 2D Reaction-Diffusion from PDEBench. 2 channels (u, v concentrations),
-        # 128x128, ~10k frames after preprocessing. Teacher checkpoint and
-        # canonical step count to be set after the diagnostic sweep on this
-        # dataset (mirroring the NS workflow).
+        # 2D Reaction-Diffusion from PDEBench (FitzHugh-Nagumo). 2 channels
+        # (u, v concentrations), 128x128, ~10k frames after preprocessing.
+        # Canonical teacher = ckpt 75 + DDIM 75. Same pattern as NS — early
+        # checkpoint beats late ones (training is non-monotone). RD teacher
+        # WD ~0.042 (weaker than Darcy 0.023 / NS 0.014); RD has sharp
+        # pattern boundaries which diffusion models partially smooth.
+        # See diagnostics/rd_teacher_v1/.
         "data_path": "data/rd_128_merged.h5",
         "data_shape": (2, 128, 128),
         "stats_dir": "rd_teacher/exp_1/saved_state",
         "test_indices_path": "data/rd_test_indices.npy",
-        "teacher_ckpt": "rd_teacher/exp_1/saved_state/checkpoint_TBD.pt",
+        "teacher_ckpt": "rd_teacher/exp_1/saved_state/checkpoint_75.pt",
         "teacher_ddim_steps": 75,
         "train_samples": 9000,
     },
