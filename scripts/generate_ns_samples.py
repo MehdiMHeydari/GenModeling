@@ -63,7 +63,18 @@ def parse_only(s):
     return out
 
 
-def plot_combined(gt_mag, gen_rows, path):
+def select_field(samples, component):
+    """Reduce (N, C, H, W) to (N, H, W) for the chosen visualization.
+    component: 'mag' -> |v| across channels (default); 'vx' -> channel 0;
+    'vy' -> channel 1. Darcy (1-channel) falls back to channel 0."""
+    if component == "vx":
+        return samples[:, 0]
+    if component == "vy":
+        return samples[:, 1] if samples.shape[1] > 1 else samples[:, 0]
+    return to_scalar_field(samples)
+
+
+def plot_combined(gt_mag, gen_rows, path, gt_label="GT |v|"):
     """gen_rows: list of (label, gen_mag_array). One GT row + one Gen row per method.
 
     Per-image autoscale: each cell uses its own vmin/vmax so structure is
@@ -85,7 +96,7 @@ def plot_combined(gt_mag, gen_rows, path):
             axes[i, j].imshow(gen_mag[j])
             axes[i, j].axis("off")
 
-    axes[0, 0].set_ylabel("GT |v|", fontsize=10, rotation=0,
+    axes[0, 0].set_ylabel(gt_label, fontsize=10, rotation=0,
                           labelpad=80, ha="right", va="center")
     for i, (label, _) in enumerate(gen_rows, start=1):
         axes[i, 0].set_ylabel(label, fontsize=9, rotation=0,
@@ -107,10 +118,18 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--gpu", type=int, default=0)
     p.add_argument("--config", type=str, default="config/ns_paper_eval.yaml")
-    p.add_argument("--output", type=str, default="paper_figures/ns_samples_combined.png")
+    p.add_argument("--output", type=str, default=None,
+                   help="Output PNG path; default depends on --component")
+    p.add_argument("--component", type=str, default="mag",
+                   choices=["mag", "vx", "vy"],
+                   help="Field to visualize: magnitude (default), vx, or vy. "
+                        "CFD convention prefers separate vx/vy over magnitude.")
     p.add_argument("--only", type=str, default=None,
                    help="Comma list of 'method@steps' tuples to override DEFAULT_METHODS")
     args = p.parse_args()
+    if args.output is None:
+        suffix = "" if args.component == "mag" else f"_{args.component}"
+        args.output = f"paper_figures/ns_samples{suffix}_combined.png"
 
     os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu)
     device = "cuda" if th.cuda.is_available() else "cpu"
@@ -150,7 +169,8 @@ def main():
     if data.ndim == 3:
         data = data[:, None]
     real_denorm = data[test_idx]
-    gt_mag = to_scalar_field(real_denorm)
+    gt_mag = select_field(real_denorm, args.component)
+    gt_label = {"mag": "GT |v|", "vx": "GT $v_x$", "vy": "GT $v_y$"}[args.component]
 
     noise = make_noise(SEED, N_SHOW, data_shape)
 
@@ -166,12 +186,12 @@ def main():
             samples, nfe = sampler(ckpt, steps, noise, device, unet_cfg,
                                    batch_size=N_SHOW)
         gen_denorm = denormalize(samples, data_min, data_max)
-        gen_mag = to_scalar_field(gen_denorm)
+        gen_mag = select_field(gen_denorm, args.component)
         label = f"{name}\n({steps}s, NFE={nfe})"
         gen_rows.append((label, gen_mag))
         print(f"  sampled {name} @ {steps} steps")
 
-    plot_combined(gt_mag, gen_rows, args.output)
+    plot_combined(gt_mag, gen_rows, args.output, gt_label=gt_label)
     print(f"\nWrote {args.output}")
 
 
