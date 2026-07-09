@@ -48,6 +48,49 @@ def ns_divergence(samples):
     return float(np.mean(np.abs(div)))
 
 
+def cns_positivity(samples):
+    """Fraction of pixels violating positivity (rho <= 0 OR p <= 0) plus the
+    minimum density and pressure seen across the batch. samples: (N, 4, H, W)
+    with channels (density, pressure, Vx, Vy) in physical units (denormalized).
+
+    A physically valid compressible-NS sample has strictly positive density
+    and pressure everywhere; any violation is unambiguously unphysical.
+    """
+    rho = samples[:, 0]
+    p   = samples[:, 1]
+    violated = (rho <= 0) | (p <= 0)
+    frac = float(violated.mean())
+    min_rho = float(rho.min())
+    min_p   = float(p.min())
+    return {"positivity_frac": frac, "min_rho": min_rho, "min_p": min_p}
+
+
+def cns_conservation(samples, gamma=1.4):
+    """Per-sample distributions of the four conserved integrals: mass ∫ρ,
+    momentum ∫ρv_x, ∫ρv_y, and total energy ∫(½ρ|v|² + p/(γ-1)). Returns
+    the mean and std of each integral across the batch. samples: (N, 4, H, W).
+
+    For an unforced periodic PDE these integrals are conserved along a
+    trajectory; here we generate independent snapshots, so the useful
+    comparison is between the *distribution* of integrals on generated vs.
+    real samples (i.e. did the model capture the right physical regime).
+    """
+    rho = samples[:, 0]
+    p   = samples[:, 1]
+    vx  = samples[:, 2]
+    vy  = samples[:, 3]
+    mass   = rho.sum(axis=(1, 2))
+    mom_x  = (rho * vx).sum(axis=(1, 2))
+    mom_y  = (rho * vy).sum(axis=(1, 2))
+    energy = (0.5 * rho * (vx**2 + vy**2) + p / (gamma - 1.0)).sum(axis=(1, 2))
+    return {
+        "mass_mean":   float(mass.mean()),   "mass_std":   float(mass.std()),
+        "mom_x_mean":  float(mom_x.mean()),  "mom_x_std":  float(mom_x.std()),
+        "mom_y_mean":  float(mom_y.mean()),  "mom_y_std":  float(mom_y.std()),
+        "energy_mean": float(energy.mean()), "energy_std": float(energy.std()),
+    }
+
+
 def radial_power_spectrum(field):
     """Radially-averaged 2D power spectrum of a single H x W field."""
     F = np.fft.fft2(field)
@@ -80,7 +123,7 @@ def main():
     p.add_argument("--gpu", type=int, default=0)
     p.add_argument("--config", type=str, default=None,
                    help="Defaults to config/paper_eval_<dataset>.yaml")
-    p.add_argument("--dataset", type=str, required=True, choices=["darcy", "ns"])
+    p.add_argument("--dataset", type=str, required=True, choices=["darcy", "ns", "cns"])
     p.add_argument("--output", type=str, default="results/pde_metrics.csv")
     p.add_argument("--only", type=str, default=None,
                    help="Comma-separated method names to run")
@@ -88,6 +131,8 @@ def main():
 
     if args.config:
         config_path = args.config
+    elif args.dataset == "cns":
+        config_path = "config/cns_paper_eval.yaml"
     elif args.dataset == "ns":
         config_path = "config/ns_paper_eval.yaml"
     else:
@@ -114,6 +159,10 @@ def main():
 
     data_min = np.load(os.path.join(ds["stats_dir"], "data_min.npy"))
     data_max = np.load(os.path.join(ds["stats_dir"], "data_max.npy"))
+    # CNS per-channel stats broadcast to (1, C, 1, 1) for denormalize
+    if args.dataset == "cns":
+        data_min = data_min.reshape(1, -1, 1, 1)
+        data_max = data_max.reshape(1, -1, 1, 1)
     test_idx = load_test_indices(args.dataset)[:N_TEST_SAMPLES]
     with h5py.File(ds["data_path"], "r") as f:
         data = f["tensor"][:]
@@ -121,10 +170,16 @@ def main():
         data = data[:, None]
     real_denorm = data[test_idx]
 
-    metric_name = "ns_divergence" if args.dataset == "ns" else "darcy_spectral_l1"
     if args.dataset == "ns":
+        metric_name = "ns_divergence"
         real_metric = ns_divergence(real_denorm)
+    elif args.dataset == "cns":
+        metric_name = "cns_positivity_frac"
+        real_metric = cns_positivity(real_denorm)["positivity_frac"]
+        real_conservation = cns_conservation(real_denorm)
+        print(f"Reference (real) conservation stats: {real_conservation}")
     else:
+        metric_name = "darcy_spectral_l1"
         real_metric = 0.0  # Spectral L1 is gen-vs-real; real-vs-real is trivially 0
     print(f"Reference (real) {metric_name} = {real_metric:.6f}")
 
@@ -162,6 +217,13 @@ def main():
 
             if args.dataset == "ns":
                 metric = ns_divergence(gen_denorm)
+            elif args.dataset == "cns":
+                pos = cns_positivity(gen_denorm)
+                cons = cns_conservation(gen_denorm)
+                metric = pos["positivity_frac"]
+                # log the full breakdown for CNS so we don't lose it
+                print(f"    positivity: {pos}")
+                print(f"    conservation: {cons}")
             else:
                 metric = darcy_spectral_l1(gen_denorm, real_denorm)
 

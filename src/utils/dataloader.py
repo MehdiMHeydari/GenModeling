@@ -8,17 +8,78 @@ def get_data_loader(data_path, batch_size, dataset_cls, train_samples=9000,
     """Generic data loader dispatcher.
 
     Args:
-        loader_type: "darcy" or "ns" (Navier-Stokes). Default "darcy".
+        loader_type: "darcy", "ns", or "cns" (compressible NS). Default "darcy".
         Other args: passed to the specific loader.
     Returns:
         train_loader, data_min, data_max
+        (data_min / data_max are scalars for darcy/ns, per-channel float32
+        arrays of length C for cns.)
     """
+    if loader_type == "cns":
+        return get_cns_loader(data_path, batch_size, dataset_cls,
+                              train_samples=train_samples, save_dir=save_dir)
     if loader_type == "ns":
         return get_ns_loader(data_path, batch_size, dataset_cls,
                              train_samples=train_samples, save_dir=save_dir)
     else:
         return get_darcy_loader(data_path, batch_size, dataset_cls,
                                 train_samples=train_samples, save_dir=save_dir)
+
+
+def get_cns_loader(data_path, batch_size, dataset_cls, train_samples=9000,
+                   save_dir=None):
+    """Load PDEBench 2D Compressible NS.
+
+    Expects the preprocessed merged HDF5 (from scripts/preprocess_cns.py)
+    with layout (N, 4, 128, 128) under the 'tensor' key. Channels are
+    (density, pressure, Vx, Vy) — very different scales, so we normalize
+    PER-CHANNEL to [-1, 1] rather than globally.
+
+    Uses the shuffled train indices locked by scripts/lock_cns_test_indices.py
+    to avoid the NS temporal-tail OOD issue.
+    """
+    import h5py
+
+    with h5py.File(data_path, "r") as f:
+        data = np.array(f["tensor"], dtype=np.float32)  # (N, C, H, W)
+
+    N, C, H, W = data.shape
+    print(f"CNS raw: {data.shape}")
+
+    # Per-channel min-max normalize to [-1, 1]
+    flat = data.reshape(N, C, -1)
+    ch_min = flat.min(axis=(0, 2)).astype(np.float32)  # (C,)
+    ch_max = flat.max(axis=(0, 2)).astype(np.float32)  # (C,)
+    span = (ch_max - ch_min).reshape(1, C, 1, 1)
+    data_norm = 2.0 * (data - ch_min.reshape(1, C, 1, 1)) / span - 1.0
+
+    # Prefer the locked train indices if they exist (shuffled split);
+    # fall back to the first `train_samples` (deterministic order).
+    train_idx_path = "data/cns_train_indices.npy"
+    if os.path.exists(train_idx_path):
+        train_idx = np.load(train_idx_path)
+        # keep only the first `train_samples` of the locked train set
+        train_idx = train_idx[:train_samples]
+        train_data = data_norm[train_idx]
+        print(f"CNS: using {len(train_idx)} shuffled train indices from "
+              f"{train_idx_path}")
+    else:
+        train_data = data_norm[:train_samples]
+        print(f"CNS: no locked train indices, using first {train_samples} rows")
+
+    if save_dir is not None:
+        os.makedirs(save_dir, exist_ok=True)
+        np.save(os.path.join(save_dir, "data_min.npy"), ch_min)
+        np.save(os.path.join(save_dir, "data_max.npy"), ch_max)
+
+    dataset = dataset_cls(train_data, all_vel=True)
+    loader = DataLoader(
+        dataset, batch_size=batch_size,
+        shuffle=True, num_workers=2, pin_memory=True,
+    )
+    print(f"CNS loader: {len(train_data)} train samples, "
+          f"per-channel range mins={ch_min.tolist()} maxs={ch_max.tolist()}")
+    return loader, ch_min, ch_max
 
 
 def get_darcy_loader(data_path, batch_size, dataset_cls, train_samples=9000,

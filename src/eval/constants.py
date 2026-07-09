@@ -106,6 +106,21 @@ _DATASETS = {
         "teacher_ddim_steps": 75,
         "train_samples": 9000,
     },
+    "cns": {
+        # 2D Compressible Navier-Stokes from PDEBench (2D_CFD_Rand M1.0
+        # Eta0.01 Zeta0.01 periodic, 128x128). 4 channels: density, pressure,
+        # Vx, Vy. Preprocessed to 10k single snapshots from 210k available
+        # (10k trajectories x 21 timesteps). Random shuffled 9k/1k split
+        # (NOT contiguous tail — fixes the NS temporal-OOD issue). Teacher
+        # canonical checkpoint TBD, will be locked after diagnose_cns_teacher.
+        "data_path": "data/cns_128_merged.h5",
+        "data_shape": (4, 128, 128),
+        "stats_dir": "cns_teacher/exp_1/saved_state",
+        "test_indices_path": "data/cns_test_indices.npy",
+        "teacher_ckpt": "cns_teacher/exp_1/saved_state/checkpoint_75.pt",  # placeholder
+        "teacher_ddim_steps": 75,
+        "train_samples": 9000,
+    },
 }
 
 
