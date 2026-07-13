@@ -69,6 +69,7 @@ def get_cns_loader(data_path, batch_size, dataset_cls, train_samples=9000,
 
     if save_dir is not None:
         os.makedirs(save_dir, exist_ok=True)
+        # per-channel arrays are what denormalization actually uses
         np.save(os.path.join(save_dir, "data_min.npy"), ch_min)
         np.save(os.path.join(save_dir, "data_max.npy"), ch_max)
 
@@ -79,7 +80,10 @@ def get_cns_loader(data_path, batch_size, dataset_cls, train_samples=9000,
     )
     print(f"CNS loader: {len(train_data)} train samples, "
           f"per-channel range mins={ch_min.tolist()} maxs={ch_max.tolist()}")
-    return loader, ch_min, ch_max
+    # Return scalar min/max for API compatibility with training scripts'
+    # single-scalar log format. Real per-channel arrays are on disk in
+    # save_dir/data_min.npy / data_max.npy for use by evaluate_paper.py.
+    return loader, float(ch_min.min()), float(ch_max.max())
 
 
 def get_darcy_loader(data_path, batch_size, dataset_cls, train_samples=9000,
