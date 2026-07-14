@@ -67,10 +67,23 @@ def make_unet_cfg(data_shape):
     )
 
 
-def denormalize(samples, data_min, data_max):
+def denormalize(samples, stat_a, stat_b, scheme="minmax"):
+    """Map normalized samples back to physical units.
+
+    scheme="minmax": stat_a/stat_b are data_min/data_max (Darcy, NS, RD).
+    scheme="zscore": stat_a/stat_b are data_mean/data_std (CNS).
+    Per-channel stats (1-D arrays of length C) are broadcast over (N,C,H,W).
+    """
     if isinstance(samples, th.Tensor):
         samples = samples.cpu().numpy()
-    return (samples + 1.0) / 2.0 * (data_max - data_min) + data_min
+    stat_a = np.asarray(stat_a, dtype=np.float32)
+    stat_b = np.asarray(stat_b, dtype=np.float32)
+    if stat_a.ndim == 1:  # per-channel stats
+        stat_a = stat_a.reshape(1, -1, 1, 1)
+        stat_b = stat_b.reshape(1, -1, 1, 1)
+    if scheme == "zscore":
+        return samples * stat_b + stat_a
+    return (samples + 1.0) / 2.0 * (stat_b - stat_a) + stat_a
 
 
 def latest_checkpoint(save_dir):
@@ -304,17 +317,32 @@ def compute_metrics(gen_denorm, real_denorm):
     }
 
 
+def load_norm_stats(ds):
+    """Load the normalization stats for a dataset config dict.
+
+    Returns (stat_a, stat_b, scheme) matching denormalize()'s signature:
+    min/max for minmax datasets, mean/std for zscore datasets (CNS).
+    """
+    scheme = ds.get("norm", "minmax")
+    if scheme == "zscore":
+        stat_a = np.load(os.path.join(ds["stats_dir"], "data_mean.npy"))
+        stat_b = np.load(os.path.join(ds["stats_dir"], "data_std.npy"))
+    else:
+        stat_a = np.load(os.path.join(ds["stats_dir"], "data_min.npy"))
+        stat_b = np.load(os.path.join(ds["stats_dir"], "data_max.npy"))
+    return stat_a, stat_b, scheme
+
+
 def load_real_data(dataset):
     ds = get_dataset(dataset)
-    data_min = np.load(os.path.join(ds["stats_dir"], "data_min.npy"))
-    data_max = np.load(os.path.join(ds["stats_dir"], "data_max.npy"))
+    stat_a, stat_b, scheme = load_norm_stats(ds)
     test_idx = load_test_indices(dataset)[:N_TEST_SAMPLES]
     with h5py.File(ds["data_path"], "r") as f:
         data = f["tensor"][:]
     if data.ndim == 3:
         data = data[:, None]
     real_denorm = data[test_idx]
-    return real_denorm, data_min, data_max
+    return real_denorm, stat_a, stat_b, scheme
 
 
 def resolve_ckpt(entry):
@@ -364,7 +392,7 @@ def main():
             raise SystemExit(f"No methods matched --only={args.only}")
 
     seeds = args.seeds if args.seeds is not None else list(PAPER_SEEDS)
-    real_denorm, data_min, data_max = load_real_data(dataset)
+    real_denorm, stat_a, stat_b, norm_scheme = load_real_data(dataset)
 
     header = [
         "dataset", "method", "kind", "ckpt", "step_count", "seed", "nfe",
@@ -413,7 +441,7 @@ def main():
                     samples, nfe = sampler(ckpt, n_steps, noise, device, unet_cfg)
                 wall = time.time() - t0
 
-                gen_denorm = denormalize(samples, data_min, data_max)
+                gen_denorm = denormalize(samples, stat_a, stat_b, norm_scheme)
                 m = compute_metrics(gen_denorm, real_denorm)
 
                 writer.writerow([

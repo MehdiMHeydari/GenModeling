@@ -113,6 +113,14 @@ _DATASETS = {
         # (10k trajectories x 21 timesteps). Random shuffled 9k/1k split
         # (NOT contiguous tail — fixes the NS temporal-OOD issue). Teacher
         # canonical checkpoint TBD, will be locked after diagnose_cns_teacher.
+        #
+        # norm="zscore": CNS channels span disparate scales with heavy tails
+        # (pressure median 29 / max 557; velocity bulk ±0.5 / tails ±12), so
+        # global per-channel min-max compresses the bulk into 7-33% of [-1,1]
+        # (diagnostics/cns_mfm_v1/). We standardize per channel instead,
+        # following The Well. Stats files: data_mean.npy / data_std.npy in
+        # stats_dir (data_min/max.npy deliberately NOT written so legacy
+        # min-max code fails loudly instead of silently mis-denormalizing).
         "data_path": "data/cns_128_merged.h5",
         "data_shape": (4, 128, 128),
         "stats_dir": "cns_teacher/exp_1/saved_state",
@@ -120,6 +128,7 @@ _DATASETS = {
         "teacher_ckpt": "cns_teacher/exp_1/saved_state/checkpoint_75.pt",  # placeholder
         "teacher_ddim_steps": 75,
         "train_samples": 9000,
+        "norm": "zscore",
     },
 }
 

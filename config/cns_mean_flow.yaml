@@ -25,7 +25,10 @@ mean_flow:
 
 dataloader:
   datapath: "data/cns_128_merged.h5"
-  batch_size: 4
+  # batch 4 + accum 2 only used 6.2/49 GB and gave a ~7-day ETA; batch 16
+  # fits with large margin and cuts wall time several-fold. Effective batch
+  # 16 vs NS's 8 — safe (MeanFlow paper trains at much larger batches).
+  batch_size: 16
   dataset: "VF_FM"
   train_samples: 9000
   loader_type: "cns"
@@ -35,7 +38,7 @@ optimizer:
 
 train:
   num_epochs: 1000
-  grad_accum_steps: 2
+  grad_accum_steps: 1
 
   logger_dict:
     format_strs: ["log", "tensorboard"]

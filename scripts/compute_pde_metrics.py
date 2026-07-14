@@ -32,7 +32,8 @@ import torch as th
 
 from src.eval.constants import N_TEST_SAMPLES, SINGLE_SEED, get_dataset, load_test_indices
 from scripts.evaluate_paper import (
-    KIND_SAMPLERS, denormalize, make_noise, make_unet_cfg, resolve_ckpt,
+    KIND_SAMPLERS, denormalize, load_norm_stats, make_noise, make_unet_cfg,
+    resolve_ckpt,
 )
 import yaml
 
@@ -157,12 +158,9 @@ def main():
     unet_cfg = make_unet_cfg(data_shape)
     print(f"Dataset: {args.dataset}  data_shape={data_shape}")
 
-    data_min = np.load(os.path.join(ds["stats_dir"], "data_min.npy"))
-    data_max = np.load(os.path.join(ds["stats_dir"], "data_max.npy"))
-    # CNS per-channel stats broadcast to (1, C, 1, 1) for denormalize
-    if args.dataset == "cns":
-        data_min = data_min.reshape(1, -1, 1, 1)
-        data_max = data_max.reshape(1, -1, 1, 1)
+    # Scheme-aware stats: min/max for minmax datasets, mean/std for zscore
+    # (CNS). denormalize() handles per-channel broadcasting itself.
+    stat_a, stat_b, norm_scheme = load_norm_stats(ds)
     test_idx = load_test_indices(args.dataset)[:N_TEST_SAMPLES]
     with h5py.File(ds["data_path"], "r") as f:
         data = f["tensor"][:]
@@ -213,7 +211,7 @@ def main():
                 samples, nfe = sampler(ckpt, entry["student_steps"], noise, device, unet_cfg)
             else:
                 samples, nfe = sampler(ckpt, n_steps, noise, device, unet_cfg)
-            gen_denorm = denormalize(samples, data_min, data_max)
+            gen_denorm = denormalize(samples, stat_a, stat_b, norm_scheme)
 
             if args.dataset == "ns":
                 metric = ns_divergence(gen_denorm)

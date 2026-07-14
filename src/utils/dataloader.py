@@ -12,8 +12,10 @@ def get_data_loader(data_path, batch_size, dataset_cls, train_samples=9000,
         Other args: passed to the specific loader.
     Returns:
         train_loader, data_min, data_max
-        (data_min / data_max are scalars for darcy/ns, per-channel float32
-        arrays of length C for cns.)
+        (Scalars, used by the training scripts' log line. For cns they are
+        the min/max of the z-scored training data; the per-channel
+        mean/std arrays used for denormalization are saved to save_dir as
+        data_mean.npy / data_std.npy.)
     """
     if loader_type == "cns":
         return get_cns_loader(data_path, batch_size, dataset_cls,
@@ -28,12 +30,26 @@ def get_data_loader(data_path, batch_size, dataset_cls, train_samples=9000,
 
 def get_cns_loader(data_path, batch_size, dataset_cls, train_samples=9000,
                    save_dir=None):
-    """Load PDEBench 2D Compressible NS.
+    """Load PDEBench 2D Compressible NS with per-channel z-score normalization.
 
     Expects the preprocessed merged HDF5 (from scripts/preprocess_cns.py)
     with layout (N, 4, 128, 128) under the 'tensor' key. Channels are
-    (density, pressure, Vx, Vy) — very different scales, so we normalize
-    PER-CHANNEL to [-1, 1] rather than globally.
+    (density, pressure, Vx, Vy).
+
+    Why z-score and not min-max: the channels are heavy-tailed and span
+    disparate scales (pressure median 29 / max 557; velocity bulk within
+    ±0.5 / single-pixel tails at ±12). Global per-channel min-max is set by
+    those outliers and compresses the bulk of the signal into 7-33% of
+    [-1, 1] (see diagnostics/cns_mfm_v1/), which starves the small-scale
+    channels during training. Per-channel standardization (The Well's
+    convention) gives every channel unit variance. Note we deliberately do
+    NOT log-transform density/pressure: exp() denormalization would make
+    every generated sample trivially positive and destroy the positivity
+    physics check.
+
+    Stats are computed on the TRAIN subset only (no test leakage) and saved
+    as data_mean.npy / data_std.npy. data_min/max.npy are deliberately not
+    written so legacy min-max denorm code fails loudly on CNS.
 
     Uses the shuffled train indices locked by scripts/lock_cns_test_indices.py
     to avoid the NS temporal-tail OOD issue.
@@ -46,44 +62,40 @@ def get_cns_loader(data_path, batch_size, dataset_cls, train_samples=9000,
     N, C, H, W = data.shape
     print(f"CNS raw: {data.shape}")
 
-    # Per-channel min-max normalize to [-1, 1]
-    flat = data.reshape(N, C, -1)
-    ch_min = flat.min(axis=(0, 2)).astype(np.float32)  # (C,)
-    ch_max = flat.max(axis=(0, 2)).astype(np.float32)  # (C,)
-    span = (ch_max - ch_min).reshape(1, C, 1, 1)
-    data_norm = 2.0 * (data - ch_min.reshape(1, C, 1, 1)) / span - 1.0
-
-    # Prefer the locked train indices if they exist (shuffled split);
-    # fall back to the first `train_samples` (deterministic order).
+    # Select the train subset FIRST so normalization stats are train-only.
     train_idx_path = "data/cns_train_indices.npy"
     if os.path.exists(train_idx_path):
-        train_idx = np.load(train_idx_path)
-        # keep only the first `train_samples` of the locked train set
-        train_idx = train_idx[:train_samples]
-        train_data = data_norm[train_idx]
+        train_idx = np.load(train_idx_path)[:train_samples]
+        train_data = data[train_idx]
         print(f"CNS: using {len(train_idx)} shuffled train indices from "
               f"{train_idx_path}")
     else:
-        train_data = data_norm[:train_samples]
+        train_data = data[:train_samples]
         print(f"CNS: no locked train indices, using first {train_samples} rows")
+    del data
+
+    # Per-channel z-score (train-only stats)
+    ch_mean = train_data.mean(axis=(0, 2, 3)).astype(np.float32)  # (C,)
+    ch_std = train_data.std(axis=(0, 2, 3)).astype(np.float32)    # (C,)
+    ch_std = np.maximum(ch_std, 1e-8)
+    train_norm = (train_data - ch_mean.reshape(1, C, 1, 1)) \
+        / ch_std.reshape(1, C, 1, 1)
 
     if save_dir is not None:
         os.makedirs(save_dir, exist_ok=True)
-        # per-channel arrays are what denormalization actually uses
-        np.save(os.path.join(save_dir, "data_min.npy"), ch_min)
-        np.save(os.path.join(save_dir, "data_max.npy"), ch_max)
+        np.save(os.path.join(save_dir, "data_mean.npy"), ch_mean)
+        np.save(os.path.join(save_dir, "data_std.npy"), ch_std)
 
-    dataset = dataset_cls(train_data, all_vel=True)
+    dataset = dataset_cls(train_norm, all_vel=True)
     loader = DataLoader(
         dataset, batch_size=batch_size,
         shuffle=True, num_workers=2, pin_memory=True,
     )
-    print(f"CNS loader: {len(train_data)} train samples, "
-          f"per-channel range mins={ch_min.tolist()} maxs={ch_max.tolist()}")
-    # Return scalar min/max for API compatibility with training scripts'
-    # single-scalar log format. Real per-channel arrays are on disk in
-    # save_dir/data_min.npy / data_max.npy for use by evaluate_paper.py.
-    return loader, float(ch_min.min()), float(ch_max.max())
+    print(f"CNS loader: {len(train_norm)} train samples, z-score per channel; "
+          f"means={ch_mean.tolist()} stds={ch_std.tolist()}")
+    # Returned scalars feed the training scripts' "range [a, b]" log line;
+    # here they are the normalized data's actual min/max (z-units).
+    return loader, float(train_norm.min()), float(train_norm.max())
 
 
 def get_darcy_loader(data_path, batch_size, dataset_cls, train_samples=9000,
