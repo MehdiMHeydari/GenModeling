@@ -209,11 +209,46 @@ Same dependency DAG as the NS rollout:
 
 Mirror the existing `scripts/run_ns_*.sh` chain scripts for CNS.
 
+### [INFRA] RESOLVED 2026-07-14: normalization = per-channel z-score
+First launch used per-channel MIN-MAX; diagnostics after ~9h of training
+(diagnostics/cns_mfm_v1/) showed it was broken:
+- Stats are set by single-pixel shock outliers (pressure median 29 / max
+  557; velocity bulk ±0.5 / tails ±12), compressing the data bulk into
+  7–33% of [-1,1]. Normalized signal std: Vy 0.02, Vx 0.05, p 0.11, ρ 0.17
+  vs diffusion noise std 1.0.
+- Both mid-training teacher (ckpt_175) and MFM (ckpt_25) under-dispersed
+  channels in EXACTLY the predicted damage order (Vy worst → Vx → p → ρ).
+- Key mechanism is the CROSS-CHANNEL imbalance (ρ std 0.17 vs Vy 0.02 =
+  8x loss-weighting distortion), not compression per se: incompressible
+  NS is also compressed (~24% range usage) but UNIFORMLY across its two
+  channels (std 0.078 / 0.074), which is a harmless global rescale — and
+  NS trained fine. Darcy uses 57% of range. This is the one-sentence
+  justification for why CNS is z-scored while Darcy/NS stay min-max.
+- Fix: per-channel z-score, train-only stats (no test leakage), saved as
+  data_mean.npy / data_std.npy. data_min/max.npy deliberately NOT written
+  for CNS so legacy min-max code fails loudly. `denormalize()` +
+  `load_norm_stats()` in evaluate_paper.py are scheme-aware via the
+  `norm` field in `_DATASETS` (absent = minmax; all old callers unchanged).
+- Deliberately NOT log-transforming ρ/p despite heavy tails: exp() denorm
+  would make every sample trivially positive and destroy the positivity
+  physics check. Z-score keeps positivity learnable and failable
+  (ρ goes negative below z = −1.66, p below z = −1.05).
+- After z-score: bulk std 1.0 per channel; rare shock pixels at z ±20–43
+  (~1e-6 of pixels, <1% of batch MSE) — left unclipped to keep shocks
+  faithful. Round-trip denorm verified on real data (err 1.5e-5).
+- MFM relaunched with batch 16 / grad_accum 1 (was 4/2 using 6 of 49 GB,
+  7-day ETA; now 22 GB, ~4x fewer iterations). NOTE: MFM adaptive loss
+  (gamma=0) reads ≈1.0 by construction for its entire run — it is NOT a
+  convergence signal (the successful paper NS MFM went 0.99999→0.99935
+  over 1000 epochs). Judge MFM by sampling checkpoints, never by loss.
+- All three relaunched 2026-07-14 (teacher GPU 4, RF GPU 5, MFM GPU 7)
+  from scratch on z-scored data. Old min-max logs kept as
+  cns_*_run.minmax.log.
+- **Paper TODO**: add one sentence to the Datasets subsection: Darcy/NS
+  min-max to [-1,1]; CNS channels span disparate scales with heavy tails
+  so each channel is standardized (z-score), following The Well.
+
 ### [INFRA] Methodology gotchas to watch for
-- **Per-channel normalization is essential.** ρ ∈ ~[0.5, 2], p ∈ ~[0.5, 2],
-  velocities ∈ ~[-5, 5]. Globally min-max-normalizing all 4 channels
-  together would compress the small-scale fields into nothing. The NS
-  loader does global min-max — needs to be split per-channel for CNS.
 - **Discretization floor for divergence is meaningless here.** The
   reference floor on CNS will be the *real-data positivity fraction*
   (should be 0% — every real sample is positive everywhere) and the
