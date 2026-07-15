@@ -111,8 +111,16 @@ _DATASETS = {
         # Eta0.01 Zeta0.01 periodic, 128x128). 4 channels: density, pressure,
         # Vx, Vy. Preprocessed to 10k single snapshots from 210k available
         # (10k trajectories x 21 timesteps). Random shuffled 9k/1k split
-        # (NOT contiguous tail — fixes the NS temporal-OOD issue). Teacher
-        # canonical checkpoint TBD, will be locked after diagnose_cns_teacher.
+        # (NOT contiguous tail — fixes the NS temporal-OOD issue).
+        #
+        # Canonical teacher = ckpt 599 + DDIM 250, locked 2026-07-15 from the
+        # diagnose_cns_teacher sweep (diagnostics/cns_teacher_v1/): WD 2.41
+        # (ties ckpt150@75 for best; real-vs-real baseline 0.40), positivity
+        # violations 1e-5 (ckpt150@75: 0.5%), best-balanced dispersion
+        # (std ratios 0.54-0.75). Pattern: more DDIM steps recover amplitude,
+        # later checkpoints fix calibration; 599@250 gets both. Training is
+        # non-monotone (150 beats 300/450 at 75 steps) — do not swap ckpts
+        # without re-running the sweep.
         #
         # norm="zscore": CNS channels span disparate scales with heavy tails
         # (pressure median 29 / max 557; velocity bulk ±0.5 / tails ±12), so
@@ -125,8 +133,8 @@ _DATASETS = {
         "data_shape": (4, 128, 128),
         "stats_dir": "cns_teacher/exp_1/saved_state",
         "test_indices_path": "data/cns_test_indices.npy",
-        "teacher_ckpt": "cns_teacher/exp_1/saved_state/checkpoint_75.pt",  # placeholder
-        "teacher_ddim_steps": 75,
+        "teacher_ckpt": "cns_teacher/exp_1/saved_state/checkpoint_599.pt",
+        "teacher_ddim_steps": 250,
         "train_samples": 9000,
         "norm": "zscore",
     },

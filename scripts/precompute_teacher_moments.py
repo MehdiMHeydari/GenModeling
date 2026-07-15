@@ -3,10 +3,12 @@ Pre-compute teacher distribution moments from DDIM samples and save to disk.
 These are used as targets for the sampling-based moment loss during CD training.
 
 Settings are pulled from `src.eval.constants` so teacher sampling is locked
-to the canonical paper config (250 DDIM steps, ckpt 200, seed 0).
+to the canonical paper config for the chosen dataset (via --dataset; the
+canonical ckpt and DDIM step count come from `_DATASETS`).
 
 Usage:
     python scripts/precompute_teacher_moments.py --gpu 0 --n_samples 1000
+    python scripts/precompute_teacher_moments.py --gpu 0 --dataset cns
 """
 
 import argparse
@@ -17,56 +19,63 @@ import numpy as np
 from src.models.networks.unet.unet import UNetModelWrapper as UNetModel
 from src.models.vp_diffusion import VPDiffusionModel
 from src.models.diffusion_utils import ddim_step
-from src.eval.constants import (
-    TEACHER_CKPT, TEACHER_DDIM_STEPS, SCHEDULE_S, SINGLE_SEED, DATA_SHAPE,
-)
+from src.eval.constants import SCHEDULE_S, SINGLE_SEED, get_dataset
 
 
-UNET_CFG = dict(
-    dim=list(DATA_SHAPE),
-    channel_mult="1, 2, 4, 4",
-    num_channels=64,
-    num_res_blocks=2,
-    num_head_channels=32,
-    attention_resolutions="32",
-    dropout=0.0,
-    use_new_attention_order=True,
-    use_scale_shift_norm=True,
-    class_cond=False,
-    num_classes=None,
-)
+def make_unet_cfg(data_shape):
+    return dict(
+        dim=list(data_shape),
+        channel_mult="1, 2, 4, 4",
+        num_channels=64,
+        num_res_blocks=2,
+        num_head_channels=32,
+        attention_resolutions="32",
+        dropout=0.0,
+        use_new_attention_order=True,
+        use_scale_shift_norm=True,
+        class_cond=False,
+        num_classes=None,
+    )
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--gpu", type=int, default=0)
     parser.add_argument("--n_samples", type=int, default=1000)
-    parser.add_argument("--output_dir", type=str,
-                        default="darcy_teacher/exp_1/saved_state")
+    parser.add_argument("--dataset", type=str, default="darcy")
+    parser.add_argument("--output_dir", type=str, default=None,
+                        help="Defaults to the dataset's stats_dir")
     args = parser.parse_args()
+
+    ds = get_dataset(args.dataset)
+    teacher_ckpt = ds["teacher_ckpt"]
+    ddim_steps = ds["teacher_ddim_steps"]
+    data_shape = ds["data_shape"]
+    output_dir = args.output_dir or ds["stats_dir"]
 
     device = th.device(f"cuda:{args.gpu}" if th.cuda.is_available() else "cpu")
 
     # Load teacher
-    network = UNetModel(**UNET_CFG)
+    network = UNetModel(**make_unet_cfg(data_shape))
     teacher = VPDiffusionModel(network=network, schedule_s=SCHEDULE_S, infer=True)
-    state = th.load(TEACHER_CKPT, map_location="cpu", weights_only=True)
+    state = th.load(teacher_ckpt, map_location="cpu", weights_only=True)
     teacher.network.load_state_dict(state["model_state_dict"])
     teacher.to(device).eval()
+    print(f"dataset={args.dataset} teacher={teacher_ckpt} steps={ddim_steps}")
 
-    # Sample (canonical: SINGLE_SEED, TEACHER_DDIM_STEPS from src.eval.constants)
+    # Sample (canonical: SINGLE_SEED + the dataset's canonical DDIM steps)
     th.manual_seed(SINGLE_SEED)
-    ts = th.linspace(1.0, 0.0, TEACHER_DDIM_STEPS + 1, device=device)
+    ts = th.linspace(1.0, 0.0, ddim_steps + 1, device=device)
     batch_size = 64
     all_samples = []
 
     print(f"Sampling {args.n_samples} from teacher "
-          f"({TEACHER_DDIM_STEPS} DDIM steps, seed={SINGLE_SEED})...")
+          f"({ddim_steps} DDIM steps, seed={SINGLE_SEED})...")
     with th.no_grad():
         for i in range(0, args.n_samples, batch_size):
             n = min(batch_size, args.n_samples - i)
-            z = th.randn(n, *DATA_SHAPE, device=device)
-            for step in range(TEACHER_DDIM_STEPS):
+            z = th.randn(n, *data_shape, device=device)
+            for step in range(ddim_steps):
                 t_batch = th.full((n,), ts[step].item(), device=device)
                 s_batch = th.full((n,), ts[step + 1].item(), device=device)
                 x_hat = teacher.predict_x(z, t_batch)
@@ -90,7 +99,7 @@ def main():
     }
 
     # Save
-    save_path = os.path.join(args.output_dir, "teacher_moments.pt")
+    save_path = os.path.join(output_dir, "teacher_moments.pt")
     th.save(moments, save_path)
 
     print(f"\nTeacher moments saved to {save_path}")

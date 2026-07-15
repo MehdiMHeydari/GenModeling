@@ -196,6 +196,23 @@ Files to create (all small, copy-edits of the NS equivalents):
   of the NS equivalent with `unet.dim: [4, 128, 128]` and the CNS data
   path.
 
+### [INFRA] RESOLVED 2026-07-15: canonical CNS teacher = ckpt 599 + DDIM 250
+Teacher finished all 600 epochs (z-score run). Checkpoint sweep
+(scripts/diagnose_cns_teacher.py, results in diagnostics/cns_teacher_v1/):
+- WD vs real (baseline real-vs-real = 0.40): 150@75 2.41, 599@250 2.41,
+  599@75 3.62, 150@250 4.70, others worse. Non-monotone again (300 much
+  worse than 150).
+- 599@250 wins on the tiebreakers: positivity violations 1e-5 (150@75 has
+  0.5%, 150@250 has 4.9%) and best-balanced dispersion (std ratios
+  0.54-0.75 vs 0.44-0.69).
+- Pattern worth remembering: MORE DDIM STEPS recover amplitude/dispersion,
+  LATER checkpoints fix calibration. Matches Darcy (250 steps) not NS (75).
+- Teacher still under-disperses overall (std ratios < 1); this is the
+  ceiling CD/PRISM inherit. Noted for the paper's teacher-quality caveat.
+_DATASETS["cns"] updated; cns_cm_cd.yaml / cns_cm_cd_prism.yaml already
+pointed at ckpt_599. precompute_teacher_moments.py generalized with
+--dataset (darcy default unchanged).
+
 ### [INFRA] Parallel training plan once configs are ready
 
 Same dependency DAG as the NS rollout:
