@@ -44,7 +44,9 @@ train:
     log_print_freq: 5
 
   checkpointing_dict:
-    restart: False
-    restart_epoch: null
+    # Resuming after the 2026-07-16 server reboot killed the run at ~epoch 275.
+    # Last surviving checkpoint: 250.
+    restart: True
+    restart_epoch: 250
     save_epoch_int: 25
     log_batch_int: 10
