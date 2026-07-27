@@ -133,8 +133,15 @@ _DATASETS = {
         "data_shape": (4, 128, 128),
         "stats_dir": "cns_teacher/exp_1/saved_state",
         "test_indices_path": "data/cns_test_indices.npy",
+        # Sampling protocol locked 2026-07-26 from the eta probe
+        # (diagnostics/cns_teacher_sampling_v1/): eta=0.5 stochastic DDIM at
+        # 500 steps. Best mean per-channel WD (0.159 vs 0.200 for the old
+        # DDIM 250), balanced channels, positivity clean. Deterministic DDIM
+        # under-disperses the heavy-tailed channels; full DDPM over-favors
+        # pressure at the cost of velocities.
         "teacher_ckpt": "cns_teacher/exp_1/saved_state/checkpoint_599.pt",
-        "teacher_ddim_steps": 250,
+        "teacher_ddim_steps": 500,
+        "teacher_eta": 0.5,
         "train_samples": 9000,
         "norm": "zscore",
     },

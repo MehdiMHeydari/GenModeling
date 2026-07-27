@@ -205,12 +205,17 @@ def main():
         sampler = KIND_SAMPLERS[kind]
         step_counts = entry.get("step_counts", [entry.get("student_steps")])
 
+        sampler_kwargs = {}
+        if kind == "teacher" and "eta" in entry:
+            sampler_kwargs["eta"] = float(entry["eta"])
+
         for n_steps in step_counts:
             noise = make_noise(SINGLE_SEED, N_TEST_SAMPLES, data_shape)
             if kind == "cd":
                 samples, nfe = sampler(ckpt, entry["student_steps"], noise, device, unet_cfg)
             else:
-                samples, nfe = sampler(ckpt, n_steps, noise, device, unet_cfg)
+                samples, nfe = sampler(ckpt, n_steps, noise, device, unet_cfg,
+                                       **sampler_kwargs)
             gen_denorm = denormalize(samples, stat_a, stat_b, norm_scheme)
 
             if args.dataset == "ns":

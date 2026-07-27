@@ -17,17 +17,20 @@
 dataset: cns
 
 methods:
-  # --- Teacher baselines: both sampling protocols on the canonical ckpt ---
+  # --- Teacher baselines ---
+  # Canonical protocol (locked from the eta probe): eta=0.5 at 500 steps.
+  - name: "CNS-Teacher-eta05-500"
+    kind: "teacher"
+    eta: 0.5
+    ckpt: "cns_teacher/exp_1/saved_state/checkpoint_599.pt"
+    step_counts: [500]
+    notes: "CANONICAL: stochastic eta=0.5, best mean per-channel WD (0.159)"
+  # Old deterministic protocol kept for the protocol-comparison paragraph.
   - name: "CNS-Teacher-ddim250"
     kind: "teacher"
     ckpt: "cns_teacher/exp_1/saved_state/checkpoint_599.pt"
     step_counts: [250]
-    notes: "deterministic DDIM; under-disperses tails (sweep v1)"
-  - name: "CNS-Teacher-sde500"
-    kind: "teacher_sde"
-    ckpt: "cns_teacher/exp_1/saved_state/checkpoint_599.pt"
-    step_counts: [500]
-    notes: "stochastic ancestral sampling; candidate canonical"
+    notes: "deterministic DDIM; under-disperses tails (kept for comparison)"
 
   # --- Rectified Flow round 1 (DONE, 800 epochs) ---
   - name: "CNS-RF-ckpt799"

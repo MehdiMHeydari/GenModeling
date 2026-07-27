@@ -478,6 +478,12 @@ def main():
         sampler = KIND_SAMPLERS[kind]
         step_counts = entry.get("step_counts", [entry.get("student_steps")])
 
+        # Optional per-entry stochasticity for the teacher sampler (CNS
+        # canonical is eta=0.5 at 500 steps; see _DATASETS["cns"]).
+        sampler_kwargs = {}
+        if kind == "teacher" and "eta" in entry:
+            sampler_kwargs["eta"] = float(entry["eta"])
+
         for n_steps in step_counts:
             for seed in seeds:
                 noise = make_noise(seed, N_TEST_SAMPLES, data_shape)
@@ -487,7 +493,8 @@ def main():
                         ckpt, entry["student_steps"], noise, device, unet_cfg,
                     )
                 else:
-                    samples, nfe = sampler(ckpt, n_steps, noise, device, unet_cfg)
+                    samples, nfe = sampler(ckpt, n_steps, noise, device,
+                                           unet_cfg, **sampler_kwargs)
                 wall = time.time() - t0
 
                 gen_denorm = denormalize(samples, stat_a, stat_b, norm_scheme)
