@@ -44,10 +44,12 @@ WD_SUB = 200_000
 
 MODELS = [
     # (label, kind, ckpt, steps)
-    ("RF-1",    "rf",  "cns_rectified_flow/exp_1/saved_state/checkpoint_799.pt", 1),
-    ("RF-10",   "rf",  "cns_rectified_flow/exp_1/saved_state/checkpoint_799.pt", 10),
-    ("CD-16 (ep250)",  "cd",  "cns_student/exp_1/saved_state/checkpoint_250.pt", 16),
-    ("MFM-16 (ep375)", "mfm", "cns_mean_flow/exp_1/saved_state/checkpoint_375.pt", 16),
+    ("RF-1",     "rf",  "cns_rectified_flow/exp_1/saved_state/checkpoint_799.pt", 1),
+    ("RF-10",    "rf",  "cns_rectified_flow/exp_1/saved_state/checkpoint_799.pt", 10),
+    ("Reflow-1", "rf",  "cns_rectified_flow_reflow/exp_1/saved_state/checkpoint_399.pt", 1),
+    ("Reflow-5", "rf",  "cns_rectified_flow_reflow/exp_1/saved_state/checkpoint_399.pt", 5),
+    ("CD-16 final",  "cd",  "cns_student/exp_1/saved_state/checkpoint_999.pt", 16),
+    ("MFM-16 final", "mfm", "cns_mean_flow/exp_1/saved_state/checkpoint_999.pt", 16),
 ]
 
 
