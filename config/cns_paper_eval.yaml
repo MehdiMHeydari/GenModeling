@@ -1,0 +1,87 @@
+# CNS (2D compressible NS) paper-facing evaluation config.
+#
+# Parallels config/ns_paper_eval.yaml. Canonical teacher = ckpt 599; the
+# sampling protocol (DDIM 250 vs stochastic DDPM) is decided by the
+# diagnostics/cns_teacher_sampling_v1 sweep — BOTH protocols are evaluated
+# here so the choice is documented in the results table.
+#
+# Training snapshot (2026-07-26):
+#   Teacher — DONE (599)
+#   RF r1   — DONE (799)
+#   Reflow  — DONE (399)
+#   CD-16   — DONE (999)
+#   MFM     — DONE (999)
+#   PRISM   — ~90% (exp_22, finishing; its rows skip until ckpts exist,
+#             re-run with --only on the PRISM entries afterwards)
+
+dataset: cns
+
+methods:
+  # --- Teacher baselines: both sampling protocols on the canonical ckpt ---
+  - name: "CNS-Teacher-ddim250"
+    kind: "teacher"
+    ckpt: "cns_teacher/exp_1/saved_state/checkpoint_599.pt"
+    step_counts: [250]
+    notes: "deterministic DDIM; under-disperses tails (sweep v1)"
+  - name: "CNS-Teacher-sde500"
+    kind: "teacher_sde"
+    ckpt: "cns_teacher/exp_1/saved_state/checkpoint_599.pt"
+    step_counts: [500]
+    notes: "stochastic ancestral sampling; candidate canonical"
+
+  # --- Rectified Flow round 1 (DONE, 800 epochs) ---
+  - name: "CNS-RF-ckpt799"
+    kind: "rf"
+    ckpt: "cns_rectified_flow/exp_1/saved_state/checkpoint_799.pt"
+    step_counts: [1, 5, 10, 25, 50]
+    notes: "25/50 steps added: velocity channels need more integration"
+
+  # --- Reflow round 2 (DONE at 399) ---
+  - name: "CNS-Reflow-ckpt399"
+    kind: "rf"
+    ckpt: "cns_rectified_flow_reflow/exp_1/saved_state/checkpoint_399.pt"
+    step_counts: [1, 2, 5, 10]
+    notes: "final reflow checkpoint"
+
+  # --- CD-16 baseline (DONE, 1000 epochs) ---
+  - name: "CNS-CD16-ckpt500"
+    kind: "cd"
+    ckpt: "cns_student/exp_1/saved_state/checkpoint_500.pt"
+    student_steps: 16
+    step_counts: [16]
+  - name: "CNS-CD16-ckpt999"
+    kind: "cd"
+    ckpt: "cns_student/exp_1/saved_state/checkpoint_999.pt"
+    student_steps: 16
+    step_counts: [16]
+    notes: "final; heavily collapsed in diagnostics"
+
+  # --- MFM (DONE, 1000 epochs) ---
+  - name: "CNS-MFM-ckpt500"
+    kind: "mfm"
+    ckpt: "cns_mean_flow/exp_1/saved_state/checkpoint_500.pt"
+    step_counts: [2, 4, 8, 16]
+  - name: "CNS-MFM-ckpt999"
+    kind: "mfm"
+    ckpt: "cns_mean_flow/exp_1/saved_state/checkpoint_999.pt"
+    step_counts: [2, 4, 8, 16]
+    notes: "final; Vy channel collapsed to zero in diagnostics"
+
+  # --- PRISM (exp_22, mu=16 var=150; finishing — skips until ckpts exist) ---
+  - name: "CNS-PRISM-ckpt150"
+    kind: "cd"
+    ckpt: "cns_student/exp_22/saved_state/checkpoint_150.pt"
+    student_steps: 16
+    step_counts: [16]
+    notes: "mid-training PRISM (Darcy/NS peaked at early-mid ckpts)"
+  - name: "CNS-PRISM-ckpt250"
+    kind: "cd"
+    ckpt: "cns_student/exp_22/saved_state/checkpoint_250.pt"
+    student_steps: 16
+    step_counts: [16]
+  - name: "CNS-PRISM-ckpt299"
+    kind: "cd"
+    ckpt: "cns_student/exp_22/saved_state/checkpoint_299.pt"
+    student_steps: 16
+    step_counts: [16]
+    notes: "final PRISM checkpoint"

@@ -48,7 +48,26 @@ from src.models.vp_diffusion import VPDiffusionModel
 from src.models.consistency_models import MultistepConsistencyModel
 from src.models.flow_models import MeanFlowMatching, RectifiedFlowMatching
 from src.inference.samplers import MultistepCMSampler, MeanSampler, RectifiedFlowSampler
-from src.models.diffusion_utils import ddim_step
+from src.models.diffusion_utils import (
+    ddim_step, alpha_t, sigma_t, _broadcast_to_spatial,
+)
+
+
+def ddim_eta_step(x_hat, z_t, t, s_target, schedule_s, eta):
+    """DDIM step with stochasticity eta in (0, 1]; eta=1 = ancestral DDPM.
+
+    Deterministic DDIM under-disperses on heavy-tailed CNS channels
+    (diagnostics/cns_teacher_sampling_v1). Same schedule math as ddim_step.
+    """
+    a_t = _broadcast_to_spatial(alpha_t(t, schedule_s), x_hat)
+    sig_t = _broadcast_to_spatial(sigma_t(t, schedule_s), x_hat)
+    a_s = _broadcast_to_spatial(alpha_t(s_target, schedule_s), x_hat)
+    sig_s = _broadcast_to_spatial(sigma_t(s_target, schedule_s), x_hat)
+    sigma_noise = eta * (sig_s / sig_t) * th.sqrt(
+        th.clamp(1.0 - (a_t / a_s) ** 2, min=0.0))
+    dir_coef = th.sqrt(th.clamp(sig_s ** 2 - sigma_noise ** 2, min=0.0))
+    eps_pred = (z_t - a_t * x_hat) / sig_t
+    return a_s * x_hat + dir_coef * eps_pred + sigma_noise * th.randn_like(z_t)
 
 
 def make_unet_cfg(data_shape):
@@ -106,7 +125,8 @@ def make_noise(seed, n_samples, shape):
 # ---------------------------------------------------------------------------
 
 @th.no_grad()
-def sample_teacher(ckpt, n_steps, noise, device, unet_cfg, batch_size=64):
+def sample_teacher(ckpt, n_steps, noise, device, unet_cfg, batch_size=64,
+                   eta=0.0):
     network = UNetModel(**unet_cfg)
     model = VPDiffusionModel(network=network, schedule_s=SCHEDULE_S, infer=True)
     state = th.load(ckpt, map_location="cpu", weights_only=True)
@@ -122,11 +142,21 @@ def sample_teacher(ckpt, n_steps, noise, device, unet_cfg, batch_size=64):
             t = th.full((n,), ts[step].item(), device=device)
             s = th.full((n,), ts[step + 1].item(), device=device)
             x_hat = model.predict_x(z, t)
-            z = ddim_step(x_hat, z, t, s, SCHEDULE_S)
+            # never inject noise on the final step
+            if eta > 0.0 and step < n_steps - 1:
+                z = ddim_eta_step(x_hat, z, t, s, SCHEDULE_S, eta)
+            else:
+                z = ddim_step(x_hat, z, t, s, SCHEDULE_S)
         out.append(z.cpu())
     del model, network
     th.cuda.empty_cache()
     return th.cat(out, dim=0), n_steps
+
+
+def sample_teacher_sde(ckpt, n_steps, noise, device, unet_cfg, batch_size=64):
+    """Stochastic (ancestral, eta=1) teacher sampling."""
+    return sample_teacher(ckpt, n_steps, noise, device, unet_cfg,
+                          batch_size=batch_size, eta=1.0)
 
 
 @th.no_grad()
@@ -221,6 +251,7 @@ def sample_mfm(ckpt, n_steps, noise, device, unet_cfg, batch_size=64):
 
 KIND_SAMPLERS = {
     "teacher": sample_teacher,
+    "teacher_sde": sample_teacher_sde,
     "cd": sample_cd,
     "pd": sample_pd,
     "rf": sample_rf,
@@ -305,9 +336,27 @@ def compute_metrics(gen_denorm, real_denorm):
         m = x.mean(); s = x.std()
         return float(((x - m) ** 4).mean() / (s ** 4 + 1e-12) - 3.0)
 
+    # Per-channel WD, each normalized by the real channel's std so channels
+    # with very different physical scales are comparable (on CNS the pooled
+    # WD is dominated by pressure's 0-557 range). "|"-joined string; empty
+    # for single-channel data.
+    wd_per_channel = ""
+    if gen_denorm.ndim == 4 and gen_denorm.shape[1] > 1:
+        parts = []
+        for c in range(gen_denorm.shape[1]):
+            g = gen_denorm[:, c].flatten()
+            r = real_denorm[:, c].flatten()
+            ccap = min(len(g), len(r), 100_000)
+            gi = sub_rng.choice(len(g), size=ccap, replace=False)
+            ri = sub_rng.choice(len(r), size=ccap, replace=False)
+            ch_std = r.std() + 1e-12
+            parts.append(f"{wasserstein_distance(g[gi], r[ri]) / ch_std:.4f}")
+        wd_per_channel = "|".join(parts)
+
     return {
         "pixel_mse": float(((gen_denorm - real_denorm) ** 2).mean()),
         "wasserstein": float(wasserstein_distance(gen_sub, real_sub)),
+        "wd_per_channel": wd_per_channel,
         "mean_err": abs(float(gen_denorm.mean()) - float(real_denorm.mean())),
         "std_err": abs(float(gen_denorm.std()) - float(real_denorm.std())),
         "skew_err": abs(skew(gen_sub) - skew(real_sub)),
@@ -396,7 +445,7 @@ def main():
 
     header = [
         "dataset", "method", "kind", "ckpt", "step_count", "seed", "nfe",
-        "pixel_mse", "wasserstein", "mean_err", "std_err",
+        "pixel_mse", "wasserstein", "wd_per_channel", "mean_err", "std_err",
         "skew_err", "kurt_err", "pix_diversity", "struct_diversity",
         "wall_clock_s", "notes",
     ]
@@ -446,8 +495,8 @@ def main():
 
                 writer.writerow([
                     dataset, entry["name"], kind, ckpt, n_steps, seed, nfe,
-                    m["pixel_mse"], m["wasserstein"], m["mean_err"],
-                    m["std_err"], m["skew_err"], m["kurt_err"],
+                    m["pixel_mse"], m["wasserstein"], m["wd_per_channel"],
+                    m["mean_err"], m["std_err"], m["skew_err"], m["kurt_err"],
                     m["pix_diversity"], m["struct_diversity"],
                     wall, entry.get("notes", ""),
                 ])
