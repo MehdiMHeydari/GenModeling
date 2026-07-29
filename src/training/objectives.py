@@ -68,13 +68,22 @@ class MultistepCDLoss(Loss):
         teacher_moments_path: Path to pre-computed teacher_moments.pt.
         moment_every: Run sampling-based moment loss every N iterations.
         moment_batch_size: Number of samples to generate for moment computation.
+        moment_normalized: If True, divide each squared moment error by its
+            teacher-target scale so every term is dimensionless O(1) and the
+            weights transfer across datasets/normalizations. The raw
+            (unnormalized) loss is scale-sensitive: on z-scored CNS the
+            variance targets are up to ~60x Darcy's, so the squared terms
+            are ~3,700x larger and Darcy-tuned weights destabilize training
+            (cns_student/exp_22 diverged to structured noise). Default False
+            to keep the Darcy/NS paper runs exactly reproducible.
     """
 
     def __init__(self, class_conditional, teacher_model, student_steps=2,
                  x_var_frac=0.75, huber_epsilon=1e-4, schedule_s=0.008,
                  moment_weight_mu=0.0, moment_weight_var=0.0,
                  teacher_moments_path=None, moment_every=50,
-                 moment_batch_size=32, sample_shape=(1, 128, 128)):
+                 moment_batch_size=32, sample_shape=(1, 128, 128),
+                 moment_normalized=False):
         super().__init__(class_conditional)
         self.teacher = teacher_model
         self.student_steps = student_steps
@@ -85,6 +94,7 @@ class MultistepCDLoss(Loss):
         self.moment_weight_var = moment_weight_var
         self.moment_every = moment_every
         self.moment_batch_size = moment_batch_size
+        self.moment_normalized = moment_normalized
         self.sample_shape = tuple(sample_shape)
         self._iteration = 0
         self.last_moment_mu = 0.0
@@ -161,11 +171,28 @@ class MultistepCDLoss(Loss):
         var_student = flat.var(dim=1)
 
         # Compare to teacher targets
-        loss_mu = (mu_student.mean() - self.teacher_mu_mean) ** 2 \
-                + (mu_student.var() - self.teacher_mu_var) ** 2
+        if self.moment_normalized:
+            # Dimensionless form: each squared error is divided by its
+            # natural teacher scale. E[stat] errors are scaled by the
+            # teacher's variance of that stat (a squared z-score of the
+            # batch statistic); Var[stat] errors by the target variance
+            # squared (a squared relative error). Every term is O(1) when
+            # the student sits within the teacher's own spread.
+            eps = 1e-8
+            loss_mu = (mu_student.mean() - self.teacher_mu_mean) ** 2 \
+                / (self.teacher_mu_var + eps) \
+                + (mu_student.var() - self.teacher_mu_var) ** 2 \
+                / (self.teacher_mu_var ** 2 + eps)
+            loss_var = (var_student.mean() - self.teacher_var_mean) ** 2 \
+                / (self.teacher_var_var + eps) \
+                + (var_student.var() - self.teacher_var_var) ** 2 \
+                / (self.teacher_var_var ** 2 + eps)
+        else:
+            loss_mu = (mu_student.mean() - self.teacher_mu_mean) ** 2 \
+                    + (mu_student.var() - self.teacher_mu_var) ** 2
 
-        loss_var = (var_student.mean() - self.teacher_var_mean) ** 2 \
-                 + (var_student.var() - self.teacher_var_var) ** 2
+            loss_var = (var_student.mean() - self.teacher_var_mean) ** 2 \
+                     + (var_student.var() - self.teacher_var_var) ** 2
 
         self.last_moment_mu = loss_mu.item()
         self.last_moment_var = loss_var.item()
