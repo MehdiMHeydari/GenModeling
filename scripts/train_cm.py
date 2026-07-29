@@ -139,6 +139,7 @@ def main(config_path):
         moment_batch_size=config.cd.get("moment_batch_size", 32),
         sample_shape=tuple(config.unet.dim),
         moment_normalized=config.cd.get("moment_normalized", False),
+        moment_per_channel=config.cd.get("moment_per_channel", False),
     )
 
     # --- Optimizer ---

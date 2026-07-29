@@ -45,6 +45,9 @@ def main():
     parser.add_argument("--dataset", type=str, default="darcy")
     parser.add_argument("--output_dir", type=str, default=None,
                         help="Defaults to the dataset's stats_dir")
+    parser.add_argument("--overwrite", action="store_true",
+                        help="Overwrite teacher_moments.pt instead of "
+                             "writing teacher_moments_v2.pt when it exists")
     args = parser.parse_args()
 
     ds = get_dataset(args.dataset)
@@ -52,6 +55,7 @@ def main():
     ddim_steps = ds["teacher_ddim_steps"]
     data_shape = ds["data_shape"]
     output_dir = args.output_dir or ds["stats_dir"]
+    eta = float(ds.get("teacher_eta", 0.0))
 
     device = th.device(f"cuda:{args.gpu}" if th.cuda.is_available() else "cpu")
 
@@ -79,13 +83,19 @@ def main():
                 t_batch = th.full((n,), ts[step].item(), device=device)
                 s_batch = th.full((n,), ts[step + 1].item(), device=device)
                 x_hat = teacher.predict_x(z, t_batch)
-                z = ddim_step(x_hat, z, t_batch, s_batch, SCHEDULE_S)
+                # canonical protocol may be stochastic (teacher_eta in
+                # _DATASETS); never inject noise on the final step
+                if eta > 0.0 and step < ddim_steps - 1:
+                    from scripts.evaluate_paper import ddim_eta_step
+                    z = ddim_eta_step(x_hat, z, t_batch, s_batch, SCHEDULE_S, eta)
+                else:
+                    z = ddim_step(x_hat, z, t_batch, s_batch, SCHEDULE_S)
             all_samples.append(z.cpu())
             print(f"  {i + n}/{args.n_samples}")
 
     samples = th.cat(all_samples, dim=0)
 
-    # Compute moments
+    # Compute moments (pooled across channels — the original formulation)
     flat = samples.flatten(1)
     mu = flat.mean(dim=1)    # per-sample spatial mean
     var = flat.var(dim=1)     # per-sample spatial variance
@@ -96,10 +106,27 @@ def main():
         "var_mean": var.mean().item(),
         "var_var": var.var().item(),
         "n_samples": args.n_samples,
+        "ddim_steps": ddim_steps,
+        "eta": eta,
     }
+
+    # Per-channel targets (for moment_per_channel PRISM): same statistics
+    # computed independently for each channel.
+    B, C = samples.shape[0], samples.shape[1]
+    flat_ch = samples.reshape(B, C, -1)
+    mu_c = flat_ch.mean(dim=2)   # (B, C)
+    var_c = flat_ch.var(dim=2)   # (B, C)
+    moments["mu_mean_ch"] = mu_c.mean(dim=0)
+    moments["mu_var_ch"] = mu_c.var(dim=0)
+    moments["var_mean_ch"] = var_c.mean(dim=0)
+    moments["var_var_ch"] = var_c.var(dim=0)
 
     # Save
     save_path = os.path.join(output_dir, "teacher_moments.pt")
+    if os.path.exists(save_path) and not args.overwrite:
+        save_path = os.path.join(output_dir, "teacher_moments_v2.pt")
+        print(f"Existing teacher_moments.pt kept (in use by running sweeps); "
+              f"writing {save_path}")
     th.save(moments, save_path)
 
     print(f"\nTeacher moments saved to {save_path}")

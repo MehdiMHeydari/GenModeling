@@ -76,6 +76,13 @@ class MultistepCDLoss(Loss):
             are ~3,700x larger and Darcy-tuned weights destabilize training
             (cns_student/exp_22 diverged to structured noise). Default False
             to keep the Darcy/NS paper runs exactly reproducible.
+        moment_per_channel: If True, compute the four moment statistics per
+            CHANNEL against per-channel teacher targets (keys *_ch in the
+            moments file, from precompute_teacher_moments --per_channel) and
+            average the normalized terms over channels. The pooled stats
+            cannot see per-channel failures (a dead Vy channel leaves the
+            pooled mean/var almost unchanged on CNS because Vy carries ~2%
+            of the pooled variance). Implies moment_normalized.
     """
 
     def __init__(self, class_conditional, teacher_model, student_steps=2,
@@ -83,7 +90,7 @@ class MultistepCDLoss(Loss):
                  moment_weight_mu=0.0, moment_weight_var=0.0,
                  teacher_moments_path=None, moment_every=50,
                  moment_batch_size=32, sample_shape=(1, 128, 128),
-                 moment_normalized=False):
+                 moment_normalized=False, moment_per_channel=False):
         super().__init__(class_conditional)
         self.teacher = teacher_model
         self.student_steps = student_steps
@@ -94,7 +101,8 @@ class MultistepCDLoss(Loss):
         self.moment_weight_var = moment_weight_var
         self.moment_every = moment_every
         self.moment_batch_size = moment_batch_size
-        self.moment_normalized = moment_normalized
+        self.moment_normalized = moment_normalized or moment_per_channel
+        self.moment_per_channel = moment_per_channel
         self.sample_shape = tuple(sample_shape)
         self._iteration = 0
         self.last_moment_mu = 0.0
@@ -114,6 +122,19 @@ class MultistepCDLoss(Loss):
             print(f"Loaded teacher moments from {teacher_moments_path}")
             print(f"  target mu:  mean={self.teacher_mu_mean:.6f}, var={self.teacher_mu_var:.6f}")
             print(f"  target var: mean={self.teacher_var_mean:.6f}, var={self.teacher_var_var:.6f}")
+            if self.moment_per_channel:
+                for k in ("mu_mean_ch", "mu_var_ch", "var_mean_ch", "var_var_ch"):
+                    assert k in teacher_moments, (
+                        f"moment_per_channel=True but '{k}' missing from "
+                        f"{teacher_moments_path}. Re-run "
+                        "precompute_teacher_moments.py --per_channel."
+                    )
+                self.teacher_mu_mean_ch = teacher_moments["mu_mean_ch"].float()
+                self.teacher_mu_var_ch = teacher_moments["mu_var_ch"].float()
+                self.teacher_var_mean_ch = teacher_moments["var_mean_ch"].float()
+                self.teacher_var_var_ch = teacher_moments["var_var_ch"].float()
+                print(f"  per-channel targets loaded "
+                      f"({len(self.teacher_mu_mean_ch)} channels)")
         else:
             self.teacher_mu_mean = None
 
@@ -164,6 +185,26 @@ class MultistepCDLoss(Loss):
             t_val = torch.full((z.shape[0],), i / T - 1e-4, device=device)
             s_val = torch.full((z.shape[0],), (i - 1) / T, device=device)
             z = checkpoint(_step_fn, z, t_val, s_val, use_reentrant=False)
+
+        # Per-channel variant: stats per channel vs per-channel targets,
+        # normalized terms averaged over channels.
+        if self.moment_per_channel:
+            eps = 1e-8
+            B, C = z.shape[0], z.shape[1]
+            flat_ch = z.reshape(B, C, -1)
+            mu_c = flat_ch.mean(dim=2)     # (B, C)
+            var_c = flat_ch.var(dim=2)     # (B, C)
+            t_mu_mean = self.teacher_mu_mean_ch.to(z.device)
+            t_mu_var = self.teacher_mu_var_ch.to(z.device)
+            t_var_mean = self.teacher_var_mean_ch.to(z.device)
+            t_var_var = self.teacher_var_var_ch.to(z.device)
+            loss_mu = (((mu_c.mean(0) - t_mu_mean) ** 2 / (t_mu_var + eps))
+                       + ((mu_c.var(0) - t_mu_var) ** 2 / (t_mu_var ** 2 + eps))).mean()
+            loss_var = (((var_c.mean(0) - t_var_mean) ** 2 / (t_var_var + eps))
+                        + ((var_c.var(0) - t_var_var) ** 2 / (t_var_var ** 2 + eps))).mean()
+            self.last_moment_mu = loss_mu.item()
+            self.last_moment_var = loss_var.item()
+            return self.moment_weight_mu * loss_mu + self.moment_weight_var * loss_var
 
         # Compute moments of generated samples
         flat = z.flatten(1)
