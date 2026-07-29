@@ -30,12 +30,19 @@ N = 16
 SEED = 0
 
 MODELS = [
-    # (label, kind, ckpt, steps)
-    ("Teacher-250", "teacher", "cns_teacher/exp_1/saved_state/checkpoint_599.pt", 250),
-    ("CD-16",       "cd",      "cns_student/exp_1/saved_state/checkpoint_999.pt", 16),
-    ("RF-10",       "rf",      "cns_rectified_flow/exp_1/saved_state/checkpoint_799.pt", 10),
-    ("Reflow-1",    "rf",      "cns_rectified_flow_reflow/exp_1/saved_state/checkpoint_399.pt", 1),
-    ("MFM-16",      "mfm",     "cns_mean_flow/exp_1/saved_state/checkpoint_999.pt", 16),
+    # (label, kind, ckpt, steps, sampler_kwargs)
+    ("Teacher-eta05-500", "teacher",
+     "cns_teacher/exp_1/saved_state/checkpoint_599.pt", 500, {"eta": 0.5}),
+    ("CD-16",    "cd",
+     "cns_student/exp_1/saved_state/checkpoint_999.pt", 16, {}),
+    ("PRISM-16", "cd",
+     "cns_student/exp_22/saved_state/checkpoint_299.pt", 16, {}),
+    ("RF-50",    "rf",
+     "cns_rectified_flow/exp_1/saved_state/checkpoint_799.pt", 50, {}),
+    ("Reflow-1", "rf",
+     "cns_rectified_flow_reflow/exp_1/saved_state/checkpoint_399.pt", 1, {}),
+    ("MFM-16",   "mfm",
+     "cns_mean_flow/exp_1/saved_state/checkpoint_999.pt", 16, {}),
 ]
 
 
@@ -61,10 +68,10 @@ def main():
     noise = th.randn(N, 4, 128, 128)
 
     all_gen = {"real": real}
-    for label, kind, ckpt, steps in MODELS:
+    for label, kind, ckpt, steps, skw in MODELS:
         sampler = KIND_SAMPLERS[kind]
         s, nfe = sampler(ckpt, steps, noise.clone(), device, unet_cfg,
-                         batch_size=16)
+                         batch_size=16, **skw)
         gen = s.numpy() * ch_std.reshape(1, -1, 1, 1) \
             + ch_mean.reshape(1, -1, 1, 1)
         all_gen[label] = gen
