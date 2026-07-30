@@ -288,6 +288,30 @@ First launch used per-channel MIN-MAX; diagnostics after ~9h of training
   (Darcy spectrum + NS divergence + CNS positivity/conservation)."
 - Add a fourth column to the metrics heatmap (CNS panel).
 
+## [INFRA] Storage incidents log (2026-07-30) — READ BEFORE LAUNCHING BIG RUNS
+
+Second /ehome fill (2026-07-30, during the 5-run PRISM sweep): every
+checkpoint written after the fill was a truncated zip. Deleted only the
+verified-unreadable files. Casualty: exp_27's post-50 checkpoints (run
+finished but ckpt_75/99 corrupt; tail re-run queued from ckpt_50).
+Training processes were unaffected (in-memory state fine).
+
+Recovery: moved ns_student (43G, complete) to ~/storage/GenModeling-archive.
+darcy_student move FAILED partway because **/storage itself hit 0 bytes
+free (85T, 100%)** — partial copy deleted from /storage (source intact on
+/ehome). Current state: /ehome 44G free (enough for the sweep),
+/storage 108G free lab-wide.
+
+Structural facts:
+- Our output pipeline still writes everything to /ehome (repo-relative
+  paths). Only the raw CFD download lives on /storage.
+- Plan after sweep completes: move each finished output dir to
+  ~/storage/GenModeling-outputs/ and symlink back into the repo, so
+  configs keep working and writes land on /storage. Do NOT do this while
+  runs are live.
+- BOTH lab filesystems are effectively at capacity. This needs Meet /
+  the admin: quota or cleanup at lab level. Flag in the next meeting.
+
 ## Queued — Paper writing
 
 ### [PAPER] Fill in `paper/main.tex` with real numbers
