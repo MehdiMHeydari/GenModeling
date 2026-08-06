@@ -140,6 +140,8 @@ def main(config_path):
         sample_shape=tuple(config.unet.dim),
         moment_normalized=config.cd.get("moment_normalized", False),
         moment_per_channel=config.cd.get("moment_per_channel", False),
+        moment_spectral=config.cd.get("moment_spectral", False),
+        moment_weight_spec=config.cd.get("moment_weight_spec", 0.0),
     )
 
     # --- Optimizer ---

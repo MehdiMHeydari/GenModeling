@@ -90,7 +90,9 @@ class MultistepCDLoss(Loss):
                  moment_weight_mu=0.0, moment_weight_var=0.0,
                  teacher_moments_path=None, moment_every=50,
                  moment_batch_size=32, sample_shape=(1, 128, 128),
-                 moment_normalized=False, moment_per_channel=False):
+                 moment_normalized=False, moment_per_channel=False,
+                 moment_spectral=False, moment_weight_spec=0.0,
+                 spectral_band_edges=(1, 4, 16, 48, 64)):
         super().__init__(class_conditional)
         self.teacher = teacher_model
         self.student_steps = student_steps
@@ -103,13 +105,26 @@ class MultistepCDLoss(Loss):
         self.moment_batch_size = moment_batch_size
         self.moment_normalized = moment_normalized or moment_per_channel
         self.moment_per_channel = moment_per_channel
+        # Spectral-band moments: the amplitude moments (spatial mean/var)
+        # are blind to spatial structure — a sample can satisfy them with any
+        # texture (the exp_22 noise divergence and the exp_23-27 mid-scale
+        # textures both did). Band log-powers of the radial spectrum SEE
+        # structure: the low-k band forces field-scale commitment and the
+        # across-sample variance of band power forces regime diversity.
+        self.moment_spectral = moment_spectral
+        self.moment_weight_spec = moment_weight_spec
+        self.spectral_band_edges = tuple(spectral_band_edges)
+        self._band_masks = None  # lazy, cached per device
         self.sample_shape = tuple(sample_shape)
         self._iteration = 0
         self.last_moment_mu = 0.0
         self.last_moment_var = 0.0
+        self.last_moment_spec = 0.0
 
+        _any_moment = (moment_weight_mu > 0 or moment_weight_var > 0
+                       or (moment_spectral and moment_weight_spec > 0))
         # Load pre-computed teacher moments
-        if teacher_moments_path is not None and (moment_weight_mu > 0 or moment_weight_var > 0):
+        if teacher_moments_path is not None and _any_moment:
             import os
             assert os.path.exists(teacher_moments_path), \
                 f"Teacher moments not found: {teacher_moments_path}"
@@ -135,6 +150,22 @@ class MultistepCDLoss(Loss):
                 self.teacher_var_var_ch = teacher_moments["var_var_ch"].float()
                 print(f"  per-channel targets loaded "
                       f"({len(self.teacher_mu_mean_ch)} channels)")
+            if self.moment_spectral:
+                for k in ("spec_mean_ch", "spec_var_ch", "spec_band_edges"):
+                    assert k in teacher_moments, (
+                        f"moment_spectral=True but '{k}' missing from "
+                        f"{teacher_moments_path}. Re-run "
+                        "precompute_teacher_moments.py (spectral targets are "
+                        "computed automatically in the current version)."
+                    )
+                self.teacher_spec_mean = teacher_moments["spec_mean_ch"].float()
+                self.teacher_spec_var = teacher_moments["spec_var_ch"].float()
+                loaded_edges = tuple(int(x) for x in teacher_moments["spec_band_edges"])
+                assert loaded_edges == self.spectral_band_edges, (
+                    f"spectral band edges mismatch: targets {loaded_edges} vs "
+                    f"config {self.spectral_band_edges}")
+                print(f"  spectral targets loaded "
+                      f"{tuple(self.teacher_spec_mean.shape)} (C, bands)")
         else:
             self.teacher_mu_mean = None
 
@@ -151,6 +182,34 @@ class MultistepCDLoss(Loss):
         """Pseudo-Huber loss: sqrt(x^2 + eps^2) - eps."""
         return torch.sqrt(x ** 2 + self.huber_epsilon ** 2) - self.huber_epsilon
 
+    def _band_logpower(self, z):
+        """Per-sample, per-channel log mean power in radial wavenumber bands.
+
+        z: (B, C, H, W) -> (B, C, K) with K = len(band_edges) - 1. The DC
+        bin is excluded (band edges start at k=1); the spatial mean is
+        already constrained by the amplitude moments. Differentiable
+        (torch.fft). Band masks are cached per device/shape.
+        """
+        B, C, H, W = z.shape
+        P = torch.fft.fftshift(torch.fft.fft2(z).abs() ** 2, dim=(-2, -1))
+        if self._band_masks is None or self._band_masks[0].shape != (H, W) \
+                or self._band_masks[0].device != z.device:
+            cy, cx = H // 2, W // 2
+            yy, xx = torch.meshgrid(
+                torch.arange(H, device=z.device),
+                torch.arange(W, device=z.device), indexing="ij")
+            r = torch.sqrt((yy - cy).float() ** 2 + (xx - cx).float() ** 2)
+            self._band_masks = [
+                ((r >= lo) & (r < hi)).float()
+                for lo, hi in zip(self.spectral_band_edges[:-1],
+                                  self.spectral_band_edges[1:])
+            ]
+        stats = []
+        for m in self._band_masks:
+            band_mean = (P * m).sum(dim=(-2, -1)) / m.sum().clamp(min=1.0)
+            stats.append(torch.log(band_mean + 1e-12))
+        return torch.stack(stats, dim=-1)  # (B, C, K)
+
     def sample_moment_loss(self, model, device):
         """Run the full student sampling chain and compare moments to teacher.
 
@@ -163,7 +222,8 @@ class MultistepCDLoss(Loss):
 
         Returns weighted moment loss tensor, or None if not a moment iteration.
         """
-        if not (self.moment_weight_mu > 0 or self.moment_weight_var > 0):
+        if not (self.moment_weight_mu > 0 or self.moment_weight_var > 0
+                or (self.moment_spectral and self.moment_weight_spec > 0)):
             return None
         if self.teacher_mu_mean is None:
             return None
@@ -186,9 +246,23 @@ class MultistepCDLoss(Loss):
             s_val = torch.full((z.shape[0],), (i - 1) / T, device=device)
             z = checkpoint(_step_fn, z, t_val, s_val, use_reentrant=False)
 
-        # Per-channel variant: stats per channel vs per-channel targets,
-        # normalized terms averaged over channels.
-        if self.moment_per_channel:
+        total = None
+
+        # Spectral-band moments (composable with any amplitude variant)
+        if self.moment_spectral and self.moment_weight_spec > 0:
+            eps = 1e-8
+            s = self._band_logpower(z)          # (B, C, K)
+            t_mean = self.teacher_spec_mean.to(z.device)
+            t_var = self.teacher_spec_var.to(z.device)
+            loss_spec = (((s.mean(0) - t_mean) ** 2 / (t_var + eps))
+                         + ((s.var(0) - t_var) ** 2 / (t_var ** 2 + eps))).mean()
+            self.last_moment_spec = loss_spec.item()
+            total = self.moment_weight_spec * loss_spec
+
+        # Per-channel amplitude variant: stats per channel vs per-channel
+        # targets, normalized terms averaged over channels.
+        if self.moment_per_channel and (self.moment_weight_mu > 0
+                                        or self.moment_weight_var > 0):
             eps = 1e-8
             B, C = z.shape[0], z.shape[1]
             flat_ch = z.reshape(B, C, -1)
@@ -204,7 +278,13 @@ class MultistepCDLoss(Loss):
                         + ((var_c.var(0) - t_var_var) ** 2 / (t_var_var ** 2 + eps))).mean()
             self.last_moment_mu = loss_mu.item()
             self.last_moment_var = loss_var.item()
-            return self.moment_weight_mu * loss_mu + self.moment_weight_var * loss_var
+            amp = self.moment_weight_mu * loss_mu + self.moment_weight_var * loss_var
+            return amp if total is None else total + amp
+        if self.moment_per_channel:
+            return total
+
+        if not (self.moment_weight_mu > 0 or self.moment_weight_var > 0):
+            return total
 
         # Compute moments of generated samples
         flat = z.flatten(1)
@@ -238,7 +318,8 @@ class MultistepCDLoss(Loss):
         self.last_moment_mu = loss_mu.item()
         self.last_moment_var = loss_var.item()
 
-        return self.moment_weight_mu * loss_mu + self.moment_weight_var * loss_var
+        amp = self.moment_weight_mu * loss_mu + self.moment_weight_var * loss_var
+        return amp if total is None else total + amp
 
     def __call__(self, model, batch, device):
         """

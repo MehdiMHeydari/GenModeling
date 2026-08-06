@@ -121,12 +121,33 @@ def main():
     moments["var_mean_ch"] = var_c.mean(dim=0)
     moments["var_var_ch"] = var_c.var(dim=0)
 
-    # Save
+    # Spectral-band targets (for moment_spectral PRISM): per-sample,
+    # per-channel log mean power in radial wavenumber bands (DC excluded),
+    # summarized as across-sample mean and variance.
+    band_edges = (1, 4, 16, 48, 64)
+    H, W = samples.shape[-2:]
+    cy, cx = H // 2, W // 2
+    yy, xx = th.meshgrid(th.arange(H), th.arange(W), indexing="ij")
+    r = th.sqrt((yy - cy).float() ** 2 + (xx - cx).float() ** 2)
+    P = th.fft.fftshift(th.fft.fft2(samples).abs() ** 2, dim=(-2, -1))
+    stats = []
+    for lo, hi in zip(band_edges[:-1], band_edges[1:]):
+        m = ((r >= lo) & (r < hi)).float()
+        stats.append(th.log((P * m).sum(dim=(-2, -1)) / m.sum().clamp(min=1.0) + 1e-12))
+    spec = th.stack(stats, dim=-1)          # (B, C, K)
+    moments["spec_mean_ch"] = spec.mean(dim=0)
+    moments["spec_var_ch"] = spec.var(dim=0)
+    moments["spec_band_edges"] = th.tensor(band_edges)
+
+    # Save (never clobber a file an existing run trained against: bump
+    # the version suffix until a free name is found)
     save_path = os.path.join(output_dir, "teacher_moments.pt")
     if os.path.exists(save_path) and not args.overwrite:
-        save_path = os.path.join(output_dir, "teacher_moments_v2.pt")
-        print(f"Existing teacher_moments.pt kept (in use by running sweeps); "
-              f"writing {save_path}")
+        v = 2
+        while os.path.exists(os.path.join(output_dir, f"teacher_moments_v{v}.pt")):
+            v += 1
+        save_path = os.path.join(output_dir, f"teacher_moments_v{v}.pt")
+        print(f"Existing moment files kept; writing {save_path}")
     th.save(moments, save_path)
 
     print(f"\nTeacher moments saved to {save_path}")
