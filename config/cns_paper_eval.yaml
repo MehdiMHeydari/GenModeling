@@ -70,7 +70,18 @@ methods:
     step_counts: [2, 4, 8, 16]
     notes: "final; Vy channel collapsed to zero in diagnostics"
 
-  # --- PRISM (exp_22, mu=16 var=150; finishing — skips until ckpts exist) ---
+  # --- PRISM final configuration: exp_26, normalized per-channel moment
+  #     loss, weights (1, 1), 100 epochs. Winner of the 7-variant sweep
+  #     (exp_23-29): best per-channel WD on all four channels, positivity
+  #     violations 0.02%. ---
+  - name: "CNS-PRISM-e26-ckpt99"
+    kind: "cd"
+    ckpt: "cns_student/exp_26/saved_state/checkpoint_99.pt"
+    student_steps: 16
+    step_counts: [16]
+    notes: "PRISM normalized per-channel moments w=1 (paper row)"
+
+  # --- PRISM exp_22 (diverged, unnormalized loss; kept for the record) ---
   - name: "CNS-PRISM-ckpt150"
     kind: "cd"
     ckpt: "cns_student/exp_22/saved_state/checkpoint_150.pt"
