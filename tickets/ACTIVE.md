@@ -288,6 +288,29 @@ First launch used per-channel MIN-MAX; diagnostics after ~9h of training
   (Darcy spectrum + NS divergence + CNS positivity/conservation)."
 - Add a fourth column to the metrics heatmap (CNS panel).
 
+## [PAPER] RESOLVED 2026-08-12: CNS PRISM outcome + paper numbers complete
+
+Sweep verdict (exp_22-29, all on the CNS z-scored data):
+- exp_22 (raw loss, Darcy weights): DIVERGED to structured noise (the
+  scale-sensitivity finding; documented in Analysis).
+- exp_23-25 (normalized, w=0.25/1/4 pooled): stable; w=0.25 keeps most
+  layout diversity, w>=1 collapses layout.
+- exp_26 (normalized PER-CHANNEL, w=1): WINNER — official rows
+  WD 15.12 (3-seed), MSE 337, positivity 0.020%, struct 1.38.
+  This is the paper's CNS PRISM row (config cns_cm_cd_prism_exp26.yaml,
+  ckpt_99, 100 epochs).
+- exp_27 (cadence every-4): stable, weaker marginals.
+- exp_28/29 (spectral-band moments): NEGATIVE RESULT — over-constrain
+  and collapse dispersion (std ratios 0.05-0.19). One sentence in the
+  paper: which statistics are matched matters as much as how strongly.
+
+Paper state: 19 pages, 0 undefined refs. CNS fully integrated:
+datasets/metrics/protocol subsections, three-panel heatmap
+(figures/metrics_heatmap.py), sample figures (cns_samples_density/Vy),
+results subsection with PRISM row, analysis (intermittency, two collapse
+modes, PRISM sensitivity + sweep outcome). Remaining polish: teaser
+figure has no CNS panel (optional); full pre-submission PNG check.
+
 ## [INFRA] Storage incidents log (2026-07-30) — READ BEFORE LAUNCHING BIG RUNS
 
 Second /ehome fill (2026-07-30, during the 5-run PRISM sweep): every
